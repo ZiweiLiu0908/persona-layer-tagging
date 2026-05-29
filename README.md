@@ -25,9 +25,332 @@
      - `account_style_signature`：账号级 8-facet 风格指纹。
      - `aggregated_social_identity`、`aggregated_occasion`：基于多个视频分类结果聚合出的分布和最终标签。
 
-## 2. 运行方式
+## 2. 接口调用说明
 
-### 2.1 环境变量
+### 2.1 API 基础地址
+
+如果服务部署在本机，默认 API 地址为：
+
+```text
+http://127.0.0.1:4190
+```
+
+如果服务部署在线上，请将下面示例里的 `http://127.0.0.1:4190` 替换为实际域名，例如：
+
+```text
+https://your-domain.com
+```
+
+所有提交类接口请求头：
+
+```http
+Content-Type: application/json
+```
+
+### 2.2 视频打标：提交任务
+
+API 地址：
+
+```http
+POST /api/v1/videos/tag
+```
+
+完整请求地址示例：
+
+```text
+http://127.0.0.1:4190/api/v1/videos/tag
+```
+
+输入：
+
+```json
+{
+  "video_id": "11111111-1111-1111-1111-111111111111",
+  "gcs_url": "gs://bucket/path/to/video.mp4",
+  "description": "视频 caption、标题、hashtag 等文本",
+  "callback_url": "https://example.com/video-callback"
+}
+```
+
+输入字段说明：
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `video_id` | string | 是 | 视频 UUID。 |
+| `gcs_url` | string | 是 | 视频文件地址，支持 `gs://...` 或 GCS HTTPS URL。 |
+| `description` | string | 是 | 视频文案、标题、caption、hashtag 等文本。 |
+| `callback_url` | string | 是 | 任务完成后的回调地址，必须以 `http://` 或 `https://` 开头。 |
+
+输出：
+
+```json
+{
+  "code": 0,
+  "message": "received",
+  "task_id": "22222222-2222-2222-2222-222222222222",
+  "video_id": "11111111-1111-1111-1111-111111111111",
+  "status": "pending"
+}
+```
+
+输出字段说明：
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `code` | number | `0` 表示提交成功，非 `0` 表示失败。 |
+| `message` | string | 任务接收结果，如 `received`、`already_running`、`already_processed`。 |
+| `task_id` | string | 本次打标任务 ID。 |
+| `video_id` | string | 调用方传入的视频 ID。 |
+| `status` | string | 当前任务状态，常见值为 `pending`、`running`、`success`、`failed`。 |
+
+curl 示例：
+
+```bash
+curl -X POST "http://127.0.0.1:4190/api/v1/videos/tag" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "video_id": "11111111-1111-1111-1111-111111111111",
+    "gcs_url": "gs://bucket/path/to/video.mp4",
+    "description": "视频 caption、标题、hashtag 等文本",
+    "callback_url": "https://example.com/video-callback"
+  }'
+```
+
+### 2.3 视频打标：查询结果
+
+API 地址：
+
+```http
+GET /api/v1/videos/tag/{video_id}
+```
+
+完整请求地址示例：
+
+```text
+http://127.0.0.1:4190/api/v1/videos/tag/11111111-1111-1111-1111-111111111111
+```
+
+输入：
+
+| 参数 | 位置 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- | --- |
+| `video_id` | path | string | 是 | 视频 UUID。 |
+
+输出：
+
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "id": "22222222-2222-2222-2222-222222222222",
+    "video_id": "11111111-1111-1111-1111-111111111111",
+    "gcs_url": "gs://bucket/path/to/video.mp4",
+    "description": "视频 caption、标题、hashtag 等文本",
+    "status": "success",
+    "result_code": 0,
+    "result_message": "video tagging completed",
+    "video_description_unit": {},
+    "personal_tags": {},
+    "style_vector": {},
+    "style_signature": {},
+    "raw_outputs": {},
+    "callback_url": "https://example.com/video-callback",
+    "callback_status": "success",
+    "created_at": "2026-05-29T00:00:00+00:00",
+    "updated_at": "2026-05-29T00:01:00+00:00",
+    "started_at": "2026-05-29T00:00:10+00:00",
+    "finished_at": "2026-05-29T00:01:00+00:00"
+  }
+}
+```
+
+核心输出字段说明：
+
+| 字段 | 说明 |
+| --- | --- |
+| `data.status` | 任务状态。 |
+| `data.video_description_unit` | 单视频客观描述单元。 |
+| `data.personal_tags` | 单视频人设标签。 |
+| `data.style_vector` | 32 维风格向量。 |
+| `data.style_signature` | 8-facet 风格指纹。 |
+| `data.callback_status` | 回调发送状态。 |
+
+### 2.4 博主打标：提交任务
+
+API 地址：
+
+```http
+POST /api/v1/bloggers/tag
+```
+
+完整请求地址示例：
+
+```text
+http://127.0.0.1:4190/api/v1/bloggers/tag
+```
+
+输入：
+
+```json
+{
+  "tiktok_blogger_id": "33333333-3333-3333-3333-333333333333",
+  "callback_url": "https://example.com/blogger-callback",
+  "min_video_count": 15
+}
+```
+
+输入字段说明：
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `tiktok_blogger_id` | string | 是 | TikTok 博主 UUID，必须存在于数据库 `public.tiktok_bloggers` 表。 |
+| `callback_url` | string | 是 | 任务完成后的回调地址，必须以 `http://` 或 `https://` 开头。 |
+| `min_video_count` | number | 否 | 最少成功视频数，默认 `15`，范围 `1-50`。 |
+
+输出：
+
+```json
+{
+  "code": 0,
+  "message": "received",
+  "task_id": "44444444-4444-4444-4444-444444444444",
+  "tiktok_blogger_id": "33333333-3333-3333-3333-333333333333",
+  "status": "pending",
+  "min_video_count": 15,
+  "available_video_count": 20
+}
+```
+
+输出字段说明：
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `code` | number | `0` 表示提交成功，非 `0` 表示失败。 |
+| `message` | string | 任务接收结果。 |
+| `task_id` | string | 本次博主打标任务 ID。 |
+| `tiktok_blogger_id` | string | 调用方传入的博主 ID。 |
+| `status` | string | 当前任务状态。 |
+| `min_video_count` | number | 本次任务要求的最少成功视频数。 |
+| `available_video_count` | number | 系统当前查询到的可用视频数。 |
+
+curl 示例：
+
+```bash
+curl -X POST "http://127.0.0.1:4190/api/v1/bloggers/tag" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "tiktok_blogger_id": "33333333-3333-3333-3333-333333333333",
+    "callback_url": "https://example.com/blogger-callback",
+    "min_video_count": 15
+  }'
+```
+
+### 2.5 博主打标：查询结果
+
+API 地址：
+
+```http
+GET /api/v1/bloggers/tag/{tiktok_blogger_id}
+```
+
+完整请求地址示例：
+
+```text
+http://127.0.0.1:4190/api/v1/bloggers/tag/33333333-3333-3333-3333-333333333333
+```
+
+输入：
+
+| 参数 | 位置 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- | --- |
+| `tiktok_blogger_id` | path | string | 是 | TikTok 博主 UUID。 |
+
+输出：
+
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "id": "44444444-4444-4444-4444-444444444444",
+    "tiktok_blogger_id": "33333333-3333-3333-3333-333333333333",
+    "status": "success",
+    "result_code": 0,
+    "result_message": "blogger tagging completed",
+    "min_video_count": 15,
+    "available_video_count": 20,
+    "usable_video_count": 20,
+    "successful_video_count": 15,
+    "failed_video_count": 0,
+    "submitted_video_count": 15,
+    "selected_video_ids": [],
+    "video_task_ids": [],
+    "account_personal_tags": {},
+    "account_style_vector": {},
+    "account_style_signature": {},
+    "aggregated_social_identity": {},
+    "aggregated_occasion": {},
+    "raw_outputs": {},
+    "callback_url": "https://example.com/blogger-callback",
+    "callback_status": "success",
+    "created_at": "2026-05-29T00:00:00+00:00",
+    "updated_at": "2026-05-29T00:05:00+00:00",
+    "started_at": "2026-05-29T00:00:10+00:00",
+    "finished_at": "2026-05-29T00:05:00+00:00"
+  }
+}
+```
+
+核心输出字段说明：
+
+| 字段 | 说明 |
+| --- | --- |
+| `data.status` | 博主任务状态。 |
+| `data.successful_video_count` | 成功参与聚合的视频数量。 |
+| `data.account_personal_tags` | 账号级人设标签。 |
+| `data.account_style_vector` | 账号级平均 32 维风格向量。 |
+| `data.account_style_signature` | 账号级 8-facet 风格指纹。 |
+| `data.aggregated_social_identity` | 多视频聚合后的社会身份标签和分布。 |
+| `data.aggregated_occasion` | 多视频聚合后的 Occasion 标签和分布。 |
+
+### 2.6 回调输出
+
+视频打标完成后，服务会请求调用方提供的 `callback_url`。
+
+视频成功回调输出：
+
+```json
+{
+  "event": "video_tagging.completed",
+  "video_id": "11111111-1111-1111-1111-111111111111",
+  "task_id": "22222222-2222-2222-2222-222222222222",
+  "status": "success",
+  "code": 0,
+  "message": "video tagging completed",
+  "error_detail": ""
+}
+```
+
+博主成功回调输出：
+
+```json
+{
+  "event": "blogger_tagging.completed",
+  "tiktok_blogger_id": "33333333-3333-3333-3333-333333333333",
+  "task_id": "44444444-4444-4444-4444-444444444444",
+  "status": "success",
+  "code": 0,
+  "message": "blogger tagging completed",
+  "error_detail": ""
+}
+```
+
+失败时，`event` 会变为 `video_tagging.failed` 或 `blogger_tagging.failed`，`status` 为 `failed`，`code` 和 `error_detail` 会返回具体错误信息。
+
+## 3. 运行方式
+
+### 3.1 环境变量
 
 服务依赖以下环境变量，可放在 `.env` 文件中：
 
@@ -50,7 +373,7 @@ QUEUE_POLL_SECONDS=2
 INTERNAL_CALLBACK_URL=http://127.0.0.1:4190/api/internal/tagging-callback
 ```
 
-### 2.2 本地启动
+### 3.2 本地启动
 
 ```bash
 pip install -r requirements.txt
@@ -63,15 +386,15 @@ python app.py
 http://127.0.0.1:4190
 ```
 
-### 2.3 Docker Compose 启动
+### 3.3 Docker Compose 启动
 
 ```bash
 docker compose up -d --build
 ```
 
-## 3. 接口通用约定
+## 4. 接口通用约定
 
-### 3.1 请求格式
+### 4.1 请求格式
 
 所有提交类接口均使用：
 
@@ -79,7 +402,7 @@ docker compose up -d --build
 Content-Type: application/json
 ```
 
-### 3.2 通用响应格式
+### 4.2 通用响应格式
 
 成功或业务失败通常返回：
 
@@ -97,7 +420,7 @@ Content-Type: application/json
 - `code != 0` 表示校验失败、任务不存在、业务失败或服务异常。
 - 部分提交接口会直接返回 `task_id`、`status` 等顶层字段。
 
-### 3.3 任务状态
+### 4.3 任务状态
 
 视频任务常见状态：
 
@@ -115,9 +438,9 @@ Content-Type: application/json
 - `success`：处理成功。
 - `failed`：处理失败。
 
-## 4. 视频打标接口
+## 5. 视频打标接口
 
-### 4.1 提交视频打标任务
+### 5.1 提交视频打标任务
 
 ```http
 POST /api/v1/videos/tag
@@ -185,7 +508,7 @@ POST /api/v1/videos/tag
 | `4006` | `unsupported fields: ...` |
 | `5000` | 服务异常。 |
 
-### 4.2 查询单个视频打标结果
+### 5.2 查询单个视频打标结果
 
 ```http
 GET /api/v1/videos/tag/{video_id}
@@ -232,7 +555,7 @@ curl "http://127.0.0.1:4190/api/v1/videos/tag/11111111-1111-1111-1111-1111111111
 }
 ```
 
-### 4.3 查询视频任务列表
+### 5.3 查询视频任务列表
 
 ```http
 GET /api/v1/video-tagging/tasks
@@ -264,7 +587,7 @@ curl "http://127.0.0.1:4190/api/v1/video-tagging/tasks?status=success&limit=50&d
 }
 ```
 
-### 4.4 获取视频新签名 GCS URL
+### 5.4 获取视频新签名 GCS URL
 
 ```http
 GET /api/v1/videos/signed-url/{video_id}
@@ -290,9 +613,9 @@ GET /api/v1/videos/signed-url/{video_id}
 }
 ```
 
-## 5. 博主打标接口
+## 6. 博主打标接口
 
-### 5.1 提交博主打标任务
+### 6.1 提交博主打标任务
 
 ```http
 POST /api/v1/bloggers/tag
@@ -353,7 +676,7 @@ POST /api/v1/bloggers/tag
 }
 ```
 
-### 5.2 查询单个博主打标结果
+### 6.2 查询单个博主打标结果
 
 ```http
 GET /api/v1/bloggers/tag/{tiktok_blogger_id}
@@ -402,7 +725,7 @@ curl "http://127.0.0.1:4190/api/v1/bloggers/tag/33333333-3333-3333-3333-33333333
 }
 ```
 
-### 5.3 查询博主任务列表
+### 6.3 查询博主任务列表
 
 ```http
 GET /api/v1/blogger-tagging/tasks
@@ -434,7 +757,7 @@ curl "http://127.0.0.1:4190/api/v1/blogger-tagging/tasks?status=success&limit=50
 }
 ```
 
-### 5.4 查询某个博主关联的视频打标任务
+### 6.4 查询某个博主关联的视频打标任务
 
 ```http
 GET /api/v1/bloggers/{tiktok_blogger_id}/video-tagging/tasks
@@ -466,9 +789,9 @@ curl "http://127.0.0.1:4190/api/v1/bloggers/33333333-3333-3333-3333-333333333333
 }
 ```
 
-## 6. 综合任务查询接口
+## 7. 综合任务查询接口
 
-### 6.1 查询视频和博主任务
+### 7.1 查询视频和博主任务
 
 ```http
 GET /api/v1/tagging/tasks
@@ -502,9 +825,9 @@ curl "http://127.0.0.1:4190/api/v1/tagging/tasks?type=video&status=success&limit
 }
 ```
 
-## 7. 回调说明
+## 8. 回调说明
 
-### 7.1 视频打标回调
+### 8.1 视频打标回调
 
 视频任务完成或失败后，服务会向提交任务时传入的 `callback_url` 发送 `POST` 请求。
 
@@ -536,7 +859,7 @@ curl "http://127.0.0.1:4190/api/v1/tagging/tasks?type=video&status=success&limit
 }
 ```
 
-### 7.2 博主打标回调
+### 8.2 博主打标回调
 
 博主任务完成或失败后，服务会向提交任务时传入的 `callback_url` 发送 `POST` 请求。
 
@@ -568,7 +891,7 @@ curl "http://127.0.0.1:4190/api/v1/tagging/tasks?type=video&status=success&limit
 }
 ```
 
-### 7.3 回调接收要求
+### 8.3 回调接收要求
 
 调用方的回调服务需要：
 
@@ -584,9 +907,9 @@ curl "http://127.0.0.1:4190/api/v1/tagging/tasks?type=video&status=success&limit
 - `callback_attempts`
 - `last_callback_at`
 
-## 8. 配置接口
+## 9. 配置接口
 
-### 8.1 查询当前配置
+### 9.1 查询当前配置
 
 ```http
 GET /api/config
@@ -604,7 +927,7 @@ GET /api/config
 - 博主 Worker 数量。
 - 5 个 Prompt 的当前内容和说明。
 
-### 8.2 更新配置
+### 9.2 更新配置
 
 ```http
 POST /api/config
@@ -638,11 +961,11 @@ POST /api/config
 data/service_config.json
 ```
 
-## 9. 数据库表
+## 10. 数据库表
 
 服务会自动创建或迁移两个结果表：
 
-### 9.1 `public.video_tagging_results`
+### 10.1 `public.video_tagging_results`
 
 用于保存视频打标任务和结果，核心字段包括：
 
@@ -666,7 +989,7 @@ data/service_config.json
 - `created_at`
 - `updated_at`
 
-### 9.2 `public.blogger_tagging_results`
+### 10.2 `public.blogger_tagging_results`
 
 用于保存博主打标任务和聚合结果，核心字段包括：
 
@@ -698,7 +1021,7 @@ data/service_config.json
 - `public.video_sources`
 - `public.candidate_videos`
 
-## 10. 前端页面
+## 11. 前端页面
 
 项目自带轻量级管理页面：
 
@@ -709,4 +1032,3 @@ data/service_config.json
 | `/task-detail.html?type=blogger&id={tiktok_blogger_id}` | 博主任务详情。 |
 | `/blogger-videos.html?blogger_id={tiktok_blogger_id}` | 某个博主关联的视频打标任务。 |
 | `/prompts.html` | 配置中心和 Prompt 管理。 |
-
