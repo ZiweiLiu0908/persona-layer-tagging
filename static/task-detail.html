@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>打标任务详情</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="service-header">
+      <div>
+        <p class="eyebrow">Tagging Detail</p>
+        <h1 id="detailTitle">打标任务详情</h1>
+        <p id="detailSubtitle">完整打标结果</p>
+      </div>
+      <div class="header-status">
+        <a class="nav-button secondary" href="/">返回任务中心</a>
+        <a class="nav-button secondary" href="/prompts.html">配置中心</a>
+        <button id="refreshBtn" type="button">刷新</button>
+      </div>
+    </header>
+
+    <main class="detail-page-shell">
+      <section id="messageBar" class="message-bar" hidden></section>
+      <section id="detailContent" class="task-list-panel detail-page-content empty-state">加载中...</section>
+    </main>
+
+    <script src="/task-detail.js"></script>
+  </body>
+</html>

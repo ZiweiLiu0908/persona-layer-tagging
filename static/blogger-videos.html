@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>博主视频打标任务</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="service-header">
+      <div>
+        <p class="eyebrow">Blogger Video Tasks</p>
+        <h1 id="pageTitle">博主视频打标任务</h1>
+        <p id="serviceSubtitle">只展示该博主触发的视频打标任务</p>
+      </div>
+      <div class="header-status">
+        <a class="nav-button secondary" href="/">返回任务中心</a>
+        <a class="nav-button secondary" href="/prompts.html">配置中心</a>
+        <button id="refreshBtn" type="button">刷新</button>
+      </div>
+    </header>
+
+    <main class="console-shell">
+      <section id="messageBar" class="message-bar" hidden></section>
+      <section class="task-list-panel">
+        <div class="center-head">
+          <div>
+            <h2>视频打标任务</h2>
+            <p id="bloggerIdLine">-</p>
+          </div>
+          <div class="filters">
+            <label>
+              <span>北京时间日期</span>
+              <input id="dateFilter" type="date" />
+            </label>
+            <label>
+              <span>状态</span>
+              <select id="statusFilter">
+                <option value="">全部</option>
+                <option value="pending">pending</option>
+                <option value="running">running</option>
+                <option value="success">success</option>
+                <option value="failed">failed</option>
+              </select>
+            </label>
+            <label>
+              <span>数量</span>
+              <input id="limitInput" type="number" min="1" max="500" value="100" />
+            </label>
+          </div>
+        </div>
+        <section id="summaryCards" class="summary-grid compact"></section>
+        <div class="task-table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>视频</th>
+                <th>状态</th>
+                <th>进度</th>
+                <th>回调</th>
+                <th>时间</th>
+              </tr>
+            </thead>
+            <tbody id="taskRows"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <script src="/blogger-videos.js"></script>
+  </body>
+</html>

@@ -1,0 +1,14 @@
+services:
+  tagging-service:
+    build: .
+    container_name: tagging-service-4190
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      HOST: 0.0.0.0
+      PORT: 4190
+    ports:
+      - "4190:4190"
+    volumes:
+      - ./data:/app/data

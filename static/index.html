@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>TikTok 打标任务中心</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="service-header">
+      <div>
+        <p class="eyebrow">Tagging Microservice</p>
+        <h1>TikTok 打标任务中心</h1>
+        <p id="serviceSubtitle">视频打标任务、博主打标任务、结果详情监控</p>
+      </div>
+      <div class="header-status">
+        <span id="apiStatus" class="health-pill pending">API 检查中</span>
+        <span id="dbStatus" class="health-pill pending">DB 检查中</span>
+        <a class="nav-button secondary" href="/prompts.html">配置中心</a>
+        <button id="refreshBtn" type="button">刷新</button>
+      </div>
+    </header>
+
+    <main class="console-shell">
+      <nav class="console-tabs" aria-label="任务类型">
+        <button id="videoTabBtn" class="tab-button active" type="button" data-kind="video">视频打标任务</button>
+        <button id="bloggerTabBtn" class="tab-button" type="button" data-kind="blogger">博主打标任务</button>
+      </nav>
+
+      <section id="messageBar" class="message-bar" hidden></section>
+
+      <section class="task-center-layout">
+        <div id="videoTaskPanel" class="task-list-panel">
+          <div class="center-head">
+            <div>
+              <h2>视频打标任务中心</h2>
+              <p>按北京时间创建日期查看单视频打标任务。</p>
+            </div>
+            <div class="filters">
+              <label>
+                <span>北京时间日期</span>
+                <input id="videoDateFilter" type="date" />
+              </label>
+              <label>
+                <span>状态</span>
+                <select id="videoStatusFilter">
+                  <option value="">全部</option>
+                  <option value="pending">pending</option>
+                  <option value="running">running</option>
+                  <option value="success">success</option>
+                  <option value="failed">failed</option>
+                </select>
+              </label>
+              <label>
+                <span>数量</span>
+                <input id="videoLimit" type="number" min="1" max="500" value="100" />
+              </label>
+            </div>
+          </div>
+          <section id="videoSummaryCards" class="summary-grid compact"></section>
+          <div class="task-table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>视频</th>
+                  <th>状态</th>
+                  <th>进度</th>
+                  <th>回调</th>
+                  <th>时间</th>
+                </tr>
+              </thead>
+              <tbody id="videoTaskRows"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div id="bloggerTaskPanel" class="task-list-panel" hidden>
+          <div class="center-head">
+            <div>
+              <h2>博主打标任务中心</h2>
+              <p>按北京时间创建日期查看账号级打标和聚合任务。</p>
+            </div>
+            <div class="filters">
+              <label>
+                <span>北京时间日期</span>
+                <input id="bloggerDateFilter" type="date" />
+              </label>
+              <label>
+                <span>状态</span>
+                <select id="bloggerStatusFilter">
+                  <option value="">全部</option>
+                  <option value="pending">pending</option>
+                  <option value="running">running</option>
+                  <option value="waiting_videos">waiting_videos</option>
+                  <option value="aggregating">aggregating</option>
+                  <option value="success">success</option>
+                  <option value="failed">failed</option>
+                </select>
+              </label>
+              <label>
+                <span>数量</span>
+                <input id="bloggerLimit" type="number" min="1" max="500" value="100" />
+              </label>
+            </div>
+          </div>
+          <section id="bloggerSummaryCards" class="summary-grid compact"></section>
+          <div class="task-table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>博主</th>
+                  <th>状态</th>
+                  <th>进度</th>
+                  <th>回调</th>
+                  <th>时间</th>
+                  <th>视频任务</th>
+                </tr>
+              </thead>
+              <tbody id="bloggerTaskRows"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>配置中心</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="service-header">
+      <div>
+        <p class="eyebrow">Service Settings</p>
+        <h1>配置中心</h1>
+        <p id="promptStatus">Prompt、Key、API 地址、模型、队列 worker 和默认并发都在这里配置。</p>
+      </div>
+      <div class="header-status">
+        <a class="nav-button secondary" href="/">返回控制台</a>
+        <button id="resetPromptsBtn" class="secondary" type="button">恢复默认 Prompt</button>
+        <button id="savePromptsBtn" type="button">保存配置</button>
+      </div>
+    </header>
+
+    <main class="console-shell">
+      <section id="messageBar" class="message-bar" hidden></section>
+
+      <section class="settings-grid">
+        <section class="primary-panel settings-panel">
+          <div class="panel-head">
+            <div>
+              <h2>API 与运行配置</h2>
+              <p>Prompt/API 配置保存后用于后续任务；Worker 数量重启后完全生效。API Key 不展示明文。</p>
+            </div>
+          </div>
+          <form id="serviceConfigForm" class="api-form">
+            <label>
+              <span>EVOLINK_API_KEY</span>
+              <input id="apiKeyInput" type="password" autocomplete="off" placeholder="留空则保持当前 Key" />
+              <small id="apiKeyHint" class="muted"></small>
+            </label>
+            <label>
+              <span>EVOLINK_TEXT_API_URL</span>
+              <input id="textApiUrlInput" />
+            </label>
+            <label>
+              <span>Text Model</span>
+              <input id="textModelInput" />
+            </label>
+            <label>
+              <span>EVOLINK_VIDEO_API_URL</span>
+              <input id="videoApiUrlInput" />
+            </label>
+            <label>
+              <span>默认 API 并发</span>
+              <input id="defaultConcurrencyInput" type="number" min="1" max="500" />
+            </label>
+            <label>
+              <span>博主打标最少成功视频数</span>
+              <input id="bloggerMinVideoCountInput" type="number" min="1" max="50" />
+              <small class="muted">外部调用博主打标 API 不传 min_video_count 时使用这个值。</small>
+            </label>
+            <label>
+              <span>视频 Worker 数量</span>
+              <input id="videoWorkerCountInput" type="number" min="1" max="100" />
+              <small class="muted">控制同时处理多少个视频打标任务。</small>
+            </label>
+            <label>
+              <span>博主 Worker 数量</span>
+              <input id="bloggerWorkerCountInput" type="number" min="1" max="50" />
+              <small class="muted">控制同时处理多少个博主打标任务。</small>
+            </label>
+          </form>
+        </section>
+
+        <section class="primary-panel settings-panel">
+          <div class="panel-head">
+            <div>
+              <h2>Prompt 说明</h2>
+              <p>每个 Prompt 的职责固定，内容可以按业务标准调整。</p>
+            </div>
+          </div>
+          <div id="promptExplainList" class="prompt-explain-list"></div>
+        </section>
+      </section>
+
+      <section class="prompt-page-grid">
+        <div class="primary-panel prompt-panel">
+          <div class="panel-head">
+            <div>
+              <h2>Prompt 1：单视频描述</h2>
+              <p id="promptDesc1">负责生成单视频描述单元。</p>
+            </div>
+          </div>
+          <textarea id="prompt1"></textarea>
+        </div>
+        <div class="primary-panel prompt-panel">
+          <div class="panel-head">
+            <div>
+              <h2>Prompt 2：账号级打标</h2>
+              <p id="promptDesc2">负责生成账号基础人口、消费层级、气质心理。</p>
+            </div>
+          </div>
+          <textarea id="prompt2"></textarea>
+        </div>
+        <div class="primary-panel prompt-panel">
+          <div class="panel-head">
+            <div>
+              <h2>Prompt 3：单视频 10 属性分类</h2>
+              <p id="promptDesc3">负责单视频 10 属性分类。</p>
+            </div>
+          </div>
+          <textarea id="prompt3"></textarea>
+        </div>
+        <div class="primary-panel prompt-panel">
+          <div class="panel-head">
+            <div>
+              <h2>Prompt 4：单视频 32 风格向量</h2>
+              <p id="promptDesc4">负责输出 32 维风格向量。</p>
+            </div>
+          </div>
+          <textarea id="prompt4"></textarea>
+        </div>
+        <div class="primary-panel prompt-panel">
+          <div class="panel-head">
+            <div>
+              <h2>Prompt 5：单视频 StyleSignature</h2>
+              <p id="promptDesc5">负责输出 8-facet 风格指纹。</p>
+            </div>
+          </div>
+          <textarea id="prompt5"></textarea>
+        </div>
+      </section>
+    </main>
+
+    <script src="/prompts.js"></script>
+    <script src="/prompt-page.js"></script>
+  </body>
+</html>
