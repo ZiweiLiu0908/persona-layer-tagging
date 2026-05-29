@@ -29,16 +29,22 @@
 
 ### 2.1 API 基础地址
 
+当前实际可调用的 API 基础地址：
+
+```text
+http://136.107.39.145:4190
+```
+
 如果服务部署在本机，默认 API 地址为：
 
 ```text
 http://127.0.0.1:4190
 ```
 
-如果服务部署在线上，请将下面示例里的 `http://127.0.0.1:4190` 替换为实际域名，例如：
+下面所有 curl 示例默认使用实际服务地址：
 
 ```text
-https://your-domain.com
+http://136.107.39.145:4190
 ```
 
 所有提交类接口请求头：
@@ -58,7 +64,7 @@ POST /api/v1/videos/tag
 完整请求地址示例：
 
 ```text
-http://127.0.0.1:4190/api/v1/videos/tag
+http://136.107.39.145:4190/api/v1/videos/tag
 ```
 
 输入：
@@ -74,12 +80,26 @@ http://127.0.0.1:4190/api/v1/videos/tag
 
 输入字段说明：
 
-| 字段 | 类型 | 必填 | 说明 |
-| --- | --- | --- | --- |
-| `video_id` | string | 是 | 视频 UUID。 |
-| `gcs_url` | string | 是 | 视频文件地址，支持 `gs://...` 或 GCS HTTPS URL。 |
-| `description` | string | 是 | 视频文案、标题、caption、hashtag 等文本。 |
-| `callback_url` | string | 是 | 任务完成后的回调地址，必须以 `http://` 或 `https://` 开头。 |
+| 字段 | 类型 | 必填 | 来源数据库/表/字段 | 说明 |
+| --- | --- | --- | --- | --- |
+| `video_id` | string | 是 | 与服务使用同一个 `DATABASE_URL` 指向的数据库；`public.video_sources.id` | 视频 UUID。 |
+| `gcs_url` | string | 是 | `public.video_sources.local_gcs_video_url` | 视频 GCS 文件地址，支持 `gs://...` 或 GCS HTTPS URL。 |
+| `description` | string | 是 | 优先 `public.video_sources.video_desc`，为空则用 `public.video_sources.video_title`，再为空则用 `public.candidate_videos.video_title` | 视频文案、标题、caption、hashtag 等文本。 |
+| `callback_url` | string | 是 | 调用方自行提供 | 任务完成后的回调地址，必须以 `http://` 或 `https://` 开头。 |
+
+对应 SQL 示例：
+
+```sql
+select
+  v.id as video_id,
+  v.local_gcs_video_url as gcs_url,
+  coalesce(v.video_desc, v.video_title, cv.video_title, '') as description
+from public.video_sources v
+left join public.candidate_videos cv on cv.video_source_id = v.id
+where v.id = '<video_id>'::uuid;
+```
+
+注意：`gcs_url` 和 `description` 不能为空，否则视频打标接口会拒绝请求。
 
 输出：
 
@@ -106,7 +126,7 @@ http://127.0.0.1:4190/api/v1/videos/tag
 curl 示例：
 
 ```bash
-curl -X POST "http://127.0.0.1:4190/api/v1/videos/tag" \
+curl -X POST "http://136.107.39.145:4190/api/v1/videos/tag" \
   -H "Content-Type: application/json" \
   -d '{
     "video_id": "11111111-1111-1111-1111-111111111111",
@@ -127,14 +147,14 @@ GET /api/v1/videos/tag/{video_id}
 完整请求地址示例：
 
 ```text
-http://127.0.0.1:4190/api/v1/videos/tag/11111111-1111-1111-1111-111111111111
+http://136.107.39.145:4190/api/v1/videos/tag/11111111-1111-1111-1111-111111111111
 ```
 
 输入：
 
 | 参数 | 位置 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- | --- |
-| `video_id` | path | string | 是 | 视频 UUID。 |
+| `video_id` | path | string | 是 | 视频 UUID，通常对应 `public.video_sources.id`。 |
 
 输出：
 
@@ -187,7 +207,7 @@ POST /api/v1/bloggers/tag
 完整请求地址示例：
 
 ```text
-http://127.0.0.1:4190/api/v1/bloggers/tag
+http://136.107.39.145:4190/api/v1/bloggers/tag
 ```
 
 输入：
@@ -202,11 +222,38 @@ http://127.0.0.1:4190/api/v1/bloggers/tag
 
 输入字段说明：
 
-| 字段 | 类型 | 必填 | 说明 |
-| --- | --- | --- | --- |
-| `tiktok_blogger_id` | string | 是 | TikTok 博主 UUID，必须存在于数据库 `public.tiktok_bloggers` 表。 |
-| `callback_url` | string | 是 | 任务完成后的回调地址，必须以 `http://` 或 `https://` 开头。 |
-| `min_video_count` | number | 否 | 最少成功视频数，默认 `15`，范围 `1-50`。 |
+| 字段 | 类型 | 必填 | 来源数据库/表/字段 | 说明 |
+| --- | --- | --- | --- | --- |
+| `tiktok_blogger_id` | string | 是 | 与服务使用同一个 `DATABASE_URL` 指向的数据库；`public.tiktok_bloggers.id` | TikTok 博主 UUID，必须存在于 `public.tiktok_bloggers` 表。 |
+| `callback_url` | string | 是 | 调用方自行提供 | 任务完成后的回调地址，必须以 `http://` 或 `https://` 开头。 |
+| `min_video_count` | number | 否 | 调用方自行提供；不传则使用服务配置 `blogger_min_video_count`，默认 `15` | 最少成功视频数，范围 `1-50`。 |
+
+博主打标接口内部会读取该博主的视频数据，读取规则如下：
+
+| 内部字段 | 来源数据库/表/字段 | 说明 |
+| --- | --- | --- |
+| `video_id` | `public.video_sources.id` | 该博主的视频 UUID。 |
+| `gcs_url` | `public.video_sources.local_gcs_video_url` | 后续提交内部视频打标任务使用的视频文件地址。 |
+| `description` | 优先 `public.video_sources.video_desc`，为空则用 `public.video_sources.video_title`，再为空则用 `public.candidate_videos.video_title` | 后续提交内部视频打标任务使用的视频文本。 |
+| 视频归属 | `public.video_sources.tiktok_blogger_id = tiktok_blogger_id` | 只读取当前博主的视频。 |
+| 候选标题关联 | `public.candidate_videos.video_source_id = public.video_sources.id` | 仅在 `video_desc` 和 `video_title` 为空时作为标题兜底。 |
+
+对应 SQL：
+
+```sql
+select
+  v.id as video_id,
+  v.local_gcs_video_url as gcs_url,
+  coalesce(v.video_desc, v.video_title, cv.video_title, '') as description,
+  v.created_at,
+  v.publish_date
+from public.video_sources v
+left join public.candidate_videos cv on cv.video_source_id = v.id
+where v.tiktok_blogger_id = '<tiktok_blogger_id>'::uuid
+order by v.publish_date desc nulls last, v.created_at desc;
+```
+
+服务会过滤掉 `gcs_url` 或 `description` 为空的视频。过滤后的可用视频数必须大于等于 `min_video_count`。
 
 输出：
 
@@ -237,7 +284,7 @@ http://127.0.0.1:4190/api/v1/bloggers/tag
 curl 示例：
 
 ```bash
-curl -X POST "http://127.0.0.1:4190/api/v1/bloggers/tag" \
+curl -X POST "http://136.107.39.145:4190/api/v1/bloggers/tag" \
   -H "Content-Type: application/json" \
   -d '{
     "tiktok_blogger_id": "33333333-3333-3333-3333-333333333333",
@@ -257,14 +304,14 @@ GET /api/v1/bloggers/tag/{tiktok_blogger_id}
 完整请求地址示例：
 
 ```text
-http://127.0.0.1:4190/api/v1/bloggers/tag/33333333-3333-3333-3333-333333333333
+http://136.107.39.145:4190/api/v1/bloggers/tag/33333333-3333-3333-3333-333333333333
 ```
 
 输入：
 
 | 参数 | 位置 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- | --- |
-| `tiktok_blogger_id` | path | string | 是 | TikTok 博主 UUID。 |
+| `tiktok_blogger_id` | path | string | 是 | TikTok 博主 UUID，对应 `public.tiktok_bloggers.id`。 |
 
 输出：
 
