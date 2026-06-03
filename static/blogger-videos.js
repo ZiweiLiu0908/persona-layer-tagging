@@ -73,6 +73,16 @@ function videoProgress(task) {
   <p class="muted">${done}/4 阶段</p>`;
 }
 
+function bloggerProfileLink(task) {
+  if (!task.blogger_url) return `<span class="muted">无</span>`;
+  return `<a class="table-link row-link" href="${escapeHtml(task.blogger_url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(task.blogger_url)}</a>`;
+}
+
+function sourceVideoLink(task) {
+  if (!task.source_url) return "";
+  return `<a class="table-link row-link" href="${escapeHtml(task.source_url)}" target="_blank" rel="noopener noreferrer">TikTok 原视频：${escapeHtml(task.source_url)}</a>`;
+}
+
 function renderSummary() {
   const counts = tasks.reduce((acc, task) => {
     acc.total += 1;
@@ -93,13 +103,15 @@ function renderSummary() {
 
 function renderRows() {
   if (!tasks.length) {
-    $("taskRows").innerHTML = `<tr><td colspan="5" class="empty-row">当前筛选下暂无该博主的视频任务。</td></tr>`;
+    $("taskRows").innerHTML = `<tr><td colspan="6" class="empty-row">当前筛选下暂无该博主的视频任务。</td></tr>`;
     return;
   }
   $("taskRows").innerHTML = tasks.map((task) => `<tr class="clickable-row" data-detail-url="/task-detail.html?type=video&id=${encodeURIComponent(task.video_id)}">
     <td><span class="kind-chip">视频</span><b>视频 ${escapeHtml(shortId(task.video_id))}</b>
+      ${sourceVideoLink(task)}
       ${task.gcs_url ? `<span class="table-link">${escapeHtml(task.gcs_url)}</span>` : ""}
     </td>
+    <td>${bloggerProfileLink(task)}</td>
     <td><span class="status-pill ${statusClass(task.status)}">${escapeHtml(task.status || "-")}</span><p class="muted">${escapeHtml(task.result_message || task.error_message || "")}</p></td>
     <td>${videoProgress(task)}</td>
     <td><span class="status-pill ${statusClass(task.callback_status)}">${escapeHtml(task.callback_status || "未回调")}</span><p class="muted">${escapeHtml(task.callback_response_code || "")}</p></td>
@@ -108,6 +120,11 @@ function renderRows() {
   document.querySelectorAll("#taskRows .clickable-row").forEach((row) => {
     row.addEventListener("click", () => {
       window.location.href = row.dataset.detailUrl;
+    });
+  });
+  document.querySelectorAll("#taskRows .row-link").forEach((link) => {
+    link.addEventListener("click", (event) => {
+      event.stopPropagation();
     });
   });
 }

@@ -17,6 +17,108 @@ class FakeAsyncConn:
         self.closed = True
 
 
+class FakeBloggerProfileConn:
+    def __init__(self):
+        self.closed = False
+
+    async def fetchrow(self, statement, *args):
+        return {"signature": "📍PHX\nRealistic & inclusive fashion for the girlies 🍒"}
+
+    async def close(self):
+        self.closed = True
+
+
+class FakeBloggerVideoTasksConn:
+    def __init__(self):
+        self.closed = False
+
+    async def execute(self, statement):
+        return None
+
+    async def fetchrow(self, statement, *args):
+        sql = statement.lower()
+        if "from public.blogger_tagging_results" in sql:
+            return {
+                "video_task_ids": ["22222222-2222-2222-2222-222222222222"],
+                "selected_video_ids": ["33333333-3333-3333-3333-333333333333"],
+            }
+        if "from public.tiktok_bloggers" in sql:
+            return {"blogger_url": "https://www.tiktok.com/@creator"}
+        return None
+
+    async def fetch(self, statement, *args):
+        sql = statement.lower()
+        if "from public.video_sources" in sql:
+            return [{"id": "33333333-3333-3333-3333-333333333333"}]
+        if "from public.video_tagging_results" in sql:
+            row = {
+                "id": "22222222-2222-2222-2222-222222222222",
+                "video_id": "33333333-3333-3333-3333-333333333333",
+                "gcs_url": "gs://bucket/video.mp4",
+                "description": "caption",
+                "status": "success",
+                "callback_url": "https://example.com/callback",
+                "source_tiktok_blogger_id": "11111111-1111-1111-1111-111111111111",
+            }
+            if "source_url" in sql:
+                row["source_url"] = "https://www.tiktok.com/@creator/video/1"
+            return [row]
+        return []
+
+    async def close(self):
+        self.closed = True
+
+
+class FakeBloggerTaskListConn:
+    def __init__(self):
+        self.closed = False
+
+    async def execute(self, statement):
+        return None
+
+    async def fetch(self, statement, *args):
+        sql = statement.lower()
+        if "from public.blogger_tagging_results" in sql:
+            return [
+                {
+                    "id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+                    "tiktok_blogger_id": "11111111-1111-1111-1111-111111111111",
+                    "status": "success",
+                    "callback_url": "https://example.com/callback",
+                    "min_video_count": 15,
+                    "available_video_count": 18,
+                    "usable_video_count": 18,
+                    "successful_video_count": 15,
+                    "failed_video_count": 0,
+                    "submitted_video_count": 0,
+                }
+            ]
+        if "from public.tiktok_bloggers" in sql:
+            return [
+                {
+                    "id": "11111111-1111-1111-1111-111111111111",
+                    "blogger_url": "https://www.tiktok.com/@creator",
+                }
+            ]
+        if "from public.video_sources" in sql:
+            return [
+                {
+                    "blogger_id": "11111111-1111-1111-1111-111111111111",
+                    "source_url": "https://www.tiktok.com/@creator/video/1",
+                    "source_video_count": 2,
+                },
+                {
+                    "blogger_id": "11111111-1111-1111-1111-111111111111",
+                    "source_url": "https://www.tiktok.com/@creator/video/2",
+                    "source_video_count": 2,
+                },
+            ]
+        return []
+
+    async def close(self):
+        self.closed = True
+
+
 class BloggerTaggingApiTests(unittest.TestCase):
     def test_validate_blogger_tagging_request_uses_uuid_and_default_min_count(self):
         ok, error, data = app.validate_blogger_tagging_request(
@@ -114,11 +216,28 @@ class BloggerTaggingApiTests(unittest.TestCase):
         prompt = app.build_blogger_one_sentence_summary_prompt(
             "请只输出 JSON",
             [{"appearance": "office girl", "content": "GRWM"}],
+            "📍PHX\nRealistic & inclusive fashion for the girlies 🍒",
         )
 
         self.assertIn("请只输出 JSON", prompt)
+        self.assertIn("TikTok 博主主页 profile/bio", prompt)
+        self.assertIn("Realistic & inclusive fashion", prompt)
         self.assertIn("video_description_unit", prompt)
         self.assertIn("office girl", prompt)
+
+    def test_fetch_blogger_profile_reads_signature(self):
+        conn = FakeBloggerProfileConn()
+
+        async def fake_connect():
+            return conn
+
+        with patch.object(app, "db_connect", fake_connect):
+            profile = asyncio.run(
+                app.fetch_blogger_profile_async("11111111-1111-1111-1111-111111111111")
+            )
+
+        self.assertIn("Realistic & inclusive fashion", profile)
+        self.assertTrue(conn.closed)
 
     def test_internal_callback_url_defaults_to_service_port(self):
         with patch.dict("os.environ", {}, clear=True):
@@ -146,6 +265,44 @@ class BloggerTaggingApiTests(unittest.TestCase):
 
         combined = "\n".join(conn.statements).lower()
         self.assertIn("add column if not exists account_one_sentence_summary text", combined)
+        self.assertTrue(conn.closed)
+
+    def test_list_blogger_video_tagging_tasks_includes_blogger_url(self):
+        conn = FakeBloggerVideoTasksConn()
+
+        async def fake_connect():
+            return conn
+
+        with patch.object(app, "db_connect", fake_connect):
+            tasks = asyncio.run(
+                app.list_blogger_video_tagging_tasks_async(
+                    "11111111-1111-1111-1111-111111111111",
+                    limit=1,
+                )
+            )
+
+        self.assertEqual(tasks[0]["blogger_url"], "https://www.tiktok.com/@creator")
+        self.assertEqual(tasks[0]["source_url"], "https://www.tiktok.com/@creator/video/1")
+        self.assertTrue(conn.closed)
+
+    def test_list_blogger_tagging_tasks_includes_profile_and_source_video_urls(self):
+        conn = FakeBloggerTaskListConn()
+
+        async def fake_connect():
+            return conn
+
+        with patch.object(app, "db_connect", fake_connect):
+            tasks = asyncio.run(app.list_blogger_tagging_tasks_async(limit=1))
+
+        self.assertEqual(tasks[0]["blogger_url"], "https://www.tiktok.com/@creator")
+        self.assertEqual(
+            tasks[0]["source_video_urls"],
+            [
+                "https://www.tiktok.com/@creator/video/1",
+                "https://www.tiktok.com/@creator/video/2",
+            ],
+        )
+        self.assertEqual(tasks[0]["source_video_count"], 2)
         self.assertTrue(conn.closed)
 
 

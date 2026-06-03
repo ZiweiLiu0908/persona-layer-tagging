@@ -33,6 +33,7 @@ class ApiConsoleFrontendTests(unittest.TestCase):
 
         self.assertIn("视频打标任务中心", html)
         self.assertIn("博主打标任务中心", html)
+        self.assertIn("TikTok 链接", html)
         self.assertIn("videoTabBtn", html)
         self.assertIn("bloggerTabBtn", html)
         self.assertIn("配置中心", html)
@@ -47,10 +48,18 @@ class ApiConsoleFrontendTests(unittest.TestCase):
         self.assertIn("task-detail.html?type=", js)
         self.assertIn("blogger-videos.html?blogger_id=", js)
         self.assertIn("blogger-video-btn", js)
+        self.assertIn("source_video_urls", js)
+        self.assertIn("原主页", js)
+        self.assertIn("原视频", js)
         self.assertIn("博主视频打标任务", blogger_videos_html)
+        self.assertIn("博主主页", blogger_videos_html)
         self.assertIn("/api/v1/bloggers/", blogger_videos_js)
         self.assertIn("/video-tagging/tasks", blogger_videos_js)
         self.assertIn("task-detail.html?type=video", blogger_videos_js)
+        self.assertIn("blogger_url", blogger_videos_js)
+        self.assertIn("source_url", blogger_videos_js)
+        self.assertIn("TikTok 原视频", blogger_videos_js)
+        self.assertIn("stopPropagation", blogger_videos_js)
         self.assertIn("/api/v1/videos/signed-url/", detail_js)
         self.assertIn("查看该博主视频任务", detail_js)
         self.assertIn("一句话总结", detail_js)
@@ -60,7 +69,8 @@ class ApiConsoleFrontendTests(unittest.TestCase):
     def test_config_page_contains_prompt_api_key_and_concurrency_settings(self):
         html = (ROOT / "static" / "prompts.html").read_text(encoding="utf-8")
         js = (ROOT / "static" / "prompt-page.js").read_text(encoding="utf-8")
-        combined = html + js
+        defaults_js = (ROOT / "static" / "prompts.js").read_text(encoding="utf-8")
+        combined = html + js + defaults_js
 
         for text in (
             "配置中心",
@@ -76,6 +86,7 @@ class ApiConsoleFrontendTests(unittest.TestCase):
             "负责输出 32 维风格向量",
             "Prompt 6：博主一句话总结",
             "account_one_sentence_summary",
+            "profile/bio",
             "/api/config",
             "video_worker_count",
             "blogger_worker_count",

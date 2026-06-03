@@ -185,11 +185,17 @@ JSON 格式如下：
 
 window.DEFAULT_PROMPT_6 = `你是一个 TikTok 博主账号级一句话总结模型。
 
-我会提供同一个博主的多个 video_description_unit。
-请把所有 video_description_unit 当作同一个账号的整体内容来分析，不要逐条视频总结，不要输出统计过程。
+我会提供同一个博主的 TikTok 主页 profile/bio 文案，以及多个 video_description_unit。
+请把 profile/bio 和所有 video_description_unit 当作同一个账号的整体信息来分析，不要逐条视频总结，不要输出统计过程。
 
 你的任务是生成一个字段：account_one_sentence_summary。
 它是一句话，用来快速说明这个博主是谁、在做什么、为什么有人看、适合怎么复刻成 AI 博主。
+
+特别注意：
+- profile/bio 是账号自我介绍，通常比单条视频更能说明地点、职业、身份、内容定位、联系方式或账号人设。
+- 如果 profile/bio 里有重要信息，并且不与视频内容明显冲突，要优先用于判断“他是谁”和“账号主要定位”。
+- 邮箱、合作方式等联系方式一般不要写进最终总结，除非它能证明职业/商业属性。
+- 如果 profile/bio 很空、只有 emoji、只有联系方式，主要根据 video_description_unit 判断。
 
 分析逻辑按这 4 步：
 
@@ -218,7 +224,7 @@ window.DEFAULT_PROMPT_6 = `你是一个 TikTok 博主账号级一句话总结模
 - 不要输出分析过程。
 - 不要输出 evidence。
 - 不要输出多个版本。
-- 不要编造 video_description_unit 里完全没有的强信息。
+- 不要编造 profile/bio 或 video_description_unit 里完全没有的强信息。
 - 如果信息不明确，用“无明显”“偏”“可能”这类保守表达。
 - 句子尽量自然、短、可直接给业务方看。
 

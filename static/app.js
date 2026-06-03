@@ -120,9 +120,23 @@ function bloggerVideosUrl(task) {
   return `/blogger-videos.html?blogger_id=${encodeURIComponent(task.tiktok_blogger_id)}`;
 }
 
+function rowLink(label, url) {
+  if (!url) return "";
+  return `<a class="table-link row-link" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(label)}：${escapeHtml(url)}</a>`;
+}
+
+function bloggerTikTokLinks(task) {
+  const videoUrls = Array.isArray(task.source_video_urls) ? task.source_video_urls.filter(Boolean) : [];
+  const count = Number(task.source_video_count || videoUrls.length);
+  const homepage = rowLink("原主页", task.blogger_url);
+  const videos = videoUrls.map((url, index) => rowLink(`原视频 ${index + 1}`, url)).join("");
+  const more = count > videoUrls.length ? `<span class="table-link muted">共 ${escapeHtml(count)} 个原视频，当前展示 ${escapeHtml(videoUrls.length)} 个</span>` : "";
+  return homepage || videos ? `${homepage}${videos}${more}` : `<span class="muted">无</span>`;
+}
+
 function renderTaskRows(targetId, tasks, kind) {
   if (!tasks.length) {
-    $(targetId).innerHTML = `<tr><td colspan="${kind === "video" ? "5" : "6"}" class="empty-row">当天暂无${kind === "video" ? "视频" : "博主"}任务。</td></tr>`;
+    $(targetId).innerHTML = `<tr><td colspan="${kind === "video" ? "5" : "7"}" class="empty-row">当天暂无${kind === "video" ? "视频" : "博主"}任务。</td></tr>`;
     return;
   }
   $(targetId).innerHTML = tasks.map((task) => {
@@ -133,6 +147,7 @@ function renderTaskRows(targetId, tasks, kind) {
       <td><span class="kind-chip">${isVideo ? "视频" : "博主"}</span><b>${escapeHtml(title)}</b>
         ${isVideo && task.gcs_url ? `<span class="table-link">${escapeHtml(task.gcs_url)}</span>` : ""}
       </td>
+      ${isVideo ? "" : `<td>${bloggerTikTokLinks(task)}</td>`}
       <td><span class="status-pill ${statusClass(task.status)}">${escapeHtml(task.status || "-")}</span><p class="muted">${escapeHtml(task.result_message || task.error_message || "")}</p></td>
       <td>${progress}</td>
       <td><span class="status-pill ${statusClass(task.callback_status)}">${escapeHtml(task.callback_status || "未回调")}</span><p class="muted">${escapeHtml(task.callback_response_code || "")}</p></td>
@@ -149,6 +164,11 @@ function renderTaskRows(targetId, tasks, kind) {
     button.addEventListener("click", (event) => {
       event.stopPropagation();
       window.location.href = button.dataset.videosUrl;
+    });
+  });
+  document.querySelectorAll(`#${targetId} .row-link`).forEach((link) => {
+    link.addEventListener("click", (event) => {
+      event.stopPropagation();
     });
   });
 }

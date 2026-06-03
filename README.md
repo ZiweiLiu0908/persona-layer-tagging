@@ -23,7 +23,7 @@
      - `account_personal_tags`：账号级基础人口、消费层级、气质心理、社会身份、Occasion。
      - `account_style_vector`：账号级平均 32 维风格向量。
      - `account_style_signature`：账号级 8-facet 风格指纹。
-     - `account_one_sentence_summary`：基于该博主多个 `video_description_unit` 生成的一句话账号总结，用于快速说明“他是谁、在做什么、为什么有人看、适合怎么复刻成 AI 博主”。
+     - `account_one_sentence_summary`：基于该博主 TikTok profile/bio 和多个 `video_description_unit` 生成的一句话账号总结，用于快速说明“他是谁、在做什么、为什么有人看、适合怎么复刻成 AI 博主”。
      - `aggregated_social_identity`、`aggregated_occasion`：基于多个视频分类结果聚合出的分布和最终标签。
 
 ## 2. 接口调用说明
@@ -360,7 +360,7 @@ http://136.107.39.145:4190/api/v1/bloggers/tag/33333333-3333-3333-3333-333333333
 | `data.account_personal_tags` | 账号级人设标签。 |
 | `data.account_style_vector` | 账号级平均 32 维风格向量。 |
 | `data.account_style_signature` | 账号级 8-facet 风格指纹。 |
-| `data.account_one_sentence_summary` | 账号级一句话总结，由配置中心的 Prompt 6 基于成功视频的 `video_description_unit` 生成。 |
+| `data.account_one_sentence_summary` | 账号级一句话总结，由配置中心的 Prompt 6 基于 TikTok profile/bio 和成功视频的 `video_description_unit` 生成。 |
 | `data.aggregated_social_identity` | 多视频聚合后的社会身份标签和分布。 |
 | `data.aggregated_occasion` | 多视频聚合后的 Occasion 标签和分布。 |
 
@@ -803,10 +803,23 @@ curl "http://127.0.0.1:4190/api/v1/blogger-tagging/tasks?status=success&limit=50
   "code": 0,
   "message": "success",
   "data": {
-    "tasks": []
+    "tasks": [
+      {
+        "id": "44444444-4444-4444-4444-444444444444",
+        "tiktok_blogger_id": "33333333-3333-3333-3333-333333333333",
+        "status": "success",
+        "blogger_url": "https://www.tiktok.com/@creator",
+        "source_video_urls": [
+          "https://www.tiktok.com/@creator/video/111"
+        ],
+        "source_video_count": 18
+      }
+    ]
   }
 }
 ```
+
+`blogger_url` 来自 `public.tiktok_bloggers.blogger_url`；`source_video_urls` 来自 `public.video_sources.source_url`，为空时兜底 `video_url` / `candidate_videos.video_url`，用于首页博主任务列表展示 TikTok 原主页和原视频链接。
 
 ### 6.4 查询某个博主关联的视频打标任务
 
@@ -835,10 +848,20 @@ curl "http://127.0.0.1:4190/api/v1/bloggers/33333333-3333-3333-3333-333333333333
   "code": 0,
   "message": "success",
   "data": {
-    "tasks": []
+    "tasks": [
+      {
+        "id": "22222222-2222-2222-2222-222222222222",
+        "video_id": "33333333-3333-3333-3333-333333333333",
+        "status": "success",
+        "source_url": "https://www.tiktok.com/@creator/video/111",
+        "blogger_url": "https://www.tiktok.com/@creator"
+      }
+    ]
   }
 }
 ```
+
+`blogger_url` 来自 `public.tiktok_bloggers.blogger_url`；`source_url` 来自 `public.video_sources.source_url`，为空时兜底 `video_url` / `candidate_videos.video_url`，用于博主视频任务页展示 TikTok 博主主页和原视频链接。
 
 ## 7. 综合任务查询接口
 
@@ -976,7 +999,7 @@ GET /api/config
 - 博主最少视频数。
 - 视频 Worker 数量。
 - 博主 Worker 数量。
-- 6 个 Prompt 的当前内容和说明，其中 Prompt 6 用于生成博主 `account_one_sentence_summary`。
+- 6 个 Prompt 的当前内容和说明，其中 Prompt 6 用于基于 TikTok profile/bio 和 `video_description_unit` 生成博主 `account_one_sentence_summary`。
 
 ### 9.2 更新配置
 

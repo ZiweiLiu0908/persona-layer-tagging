@@ -129,7 +129,7 @@ PROMPT_DESCRIPTIONS = {
     "3": "负责单视频 10 属性分类：基础人口、消费层级、气质心理、社会身份、Occasion 等单视频标签。",
     "4": "负责输出 32 维风格向量：严格按 STYLE_DIMENSIONS 输出 0-1 分数。",
     "5": "负责输出单视频 StyleSignature：8-facet 细粒度美学指纹。",
-    "6": "负责生成博主一句话总结：基于所有 video_description_unit 输出 account_one_sentence_summary。",
+    "6": "负责生成博主一句话总结：基于 TikTok profile/bio 和所有 video_description_unit 输出 account_one_sentence_summary。",
 }
 
 
@@ -805,6 +805,69 @@ def list_video_tagging_tasks(status=None, limit=100, date=None, include_blogger=
     return asyncio.run(list_video_tagging_tasks_async(status, limit, date, include_blogger))
 
 
+async def enrich_blogger_source_links(conn, tasks, video_url_limit=5):
+    blogger_ids = []
+    for task in tasks:
+        blogger_id = task.get("tiktok_blogger_id")
+        if blogger_id and blogger_id not in blogger_ids:
+            blogger_ids.append(blogger_id)
+    if not blogger_ids:
+        return tasks
+
+    blogger_rows = await conn.fetch(
+        """
+        select id, blogger_url
+        from public.tiktok_bloggers
+        where id = any($1::uuid[])
+        """,
+        blogger_ids,
+    )
+    blogger_urls = {str(row["id"]): row["blogger_url"] or "" for row in blogger_rows}
+
+    video_rows = await conn.fetch(
+        """
+        select blogger_id, source_url, source_video_count
+        from (
+          select
+            v.tiktok_blogger_id as blogger_id,
+            coalesce(nullif(v.source_url, ''), nullif(v.video_url, ''), nullif(cv.video_url, '')) as source_url,
+            count(*) over (partition by v.tiktok_blogger_id) as source_video_count,
+            row_number() over (
+              partition by v.tiktok_blogger_id
+              order by v.publish_date desc nulls last, v.created_at desc
+            ) as row_index
+          from public.video_sources v
+          left join lateral (
+            select video_url
+            from public.candidate_videos
+            where video_source_id = v.id and nullif(video_url, '') is not null
+            order by created_at desc
+            limit 1
+          ) cv on true
+          where v.tiktok_blogger_id = any($1::uuid[])
+            and coalesce(nullif(v.source_url, ''), nullif(v.video_url, ''), nullif(cv.video_url, '')) is not null
+        ) linked
+        where row_index <= $2
+        order by blogger_id, row_index
+        """,
+        blogger_ids,
+        max(1, int(video_url_limit)),
+    )
+    source_urls = {}
+    source_counts = {}
+    for row in video_rows:
+        blogger_id = str(row["blogger_id"])
+        source_urls.setdefault(blogger_id, []).append(row["source_url"])
+        source_counts[blogger_id] = int(row["source_video_count"] or 0)
+
+    for task in tasks:
+        blogger_id = task.get("tiktok_blogger_id")
+        task["blogger_url"] = blogger_urls.get(blogger_id, "")
+        task["source_video_urls"] = source_urls.get(blogger_id, [])
+        task["source_video_count"] = source_counts.get(blogger_id, len(task["source_video_urls"]))
+    return tasks
+
+
 async def list_blogger_video_tagging_tasks_async(tiktok_blogger_id, status=None, limit=100, date=None):
     conn = await db_connect()
     try:
@@ -820,6 +883,15 @@ async def list_blogger_video_tagging_tasks_async(tiktok_blogger_id, status=None,
             """,
             tiktok_blogger_id,
         )
+        blogger = await conn.fetchrow(
+            """
+            select blogger_url
+            from public.tiktok_bloggers
+            where id = $1::uuid
+            """,
+            tiktok_blogger_id,
+        )
+        blogger_url = blogger["blogger_url"] if blogger and blogger["blogger_url"] else ""
         video_task_ids = list(blogger_task["video_task_ids"] or []) if blogger_task else []
         selected_video_ids = list(blogger_task["selected_video_ids"] or []) if blogger_task else []
         blogger_video_rows = await conn.fetch(
@@ -829,26 +901,39 @@ async def list_blogger_video_tagging_tasks_async(tiktok_blogger_id, status=None,
         blogger_video_ids = [row["id"] for row in blogger_video_rows] + selected_video_ids
         values = [tiktok_blogger_id, video_task_ids, blogger_video_ids]
         where = [
-            "(source_tiktok_blogger_id = $1::uuid or id = any($2::uuid[]) or video_id = any($3::uuid[]))"
+            "(vt.source_tiktok_blogger_id = $1::uuid or vt.id = any($2::uuid[]) or vt.video_id = any($3::uuid[]))"
         ]
         if status:
             values.append(status)
-            where.append(f"status = ${len(values)}")
+            where.append(f"vt.status = ${len(values)}")
         if start_at and end_at:
             values.extend([start_at, end_at])
-            where.append(f"created_at >= ${len(values) - 1} and created_at < ${len(values)}")
+            where.append(f"vt.created_at >= ${len(values) - 1} and vt.created_at < ${len(values)}")
         values.append(limit)
         rows = await conn.fetch(
             f"""
-            select *
-            from public.video_tagging_results
+            select
+              vt.*,
+              coalesce(nullif(v.source_url, ''), nullif(v.video_url, ''), nullif(cv.video_url, '')) as source_url
+            from public.video_tagging_results vt
+            left join public.video_sources v on v.id = vt.video_id
+            left join lateral (
+              select video_url
+              from public.candidate_videos
+              where video_source_id = v.id and nullif(video_url, '') is not null
+              order by created_at desc
+              limit 1
+            ) cv on true
             where {" and ".join(where)}
-            order by created_at desc
+            order by vt.created_at desc
             limit ${len(values)}
             """,
             *values,
         )
-        return [row_to_task(row) for row in rows]
+        tasks = [row_to_task(row) for row in rows]
+        for task in tasks:
+            task["blogger_url"] = blogger_url
+        return tasks
     finally:
         await conn.close()
 
@@ -917,6 +1002,24 @@ async def update_video_tagging_task_async(task_id, **fields):
 
 def update_video_tagging_task(task_id, **fields):
     return asyncio.run(update_video_tagging_task_async(task_id, **fields))
+
+
+async def fetch_blogger_profile_async(tiktok_blogger_id):
+    conn = await db_connect()
+    try:
+        row = await conn.fetchrow(
+            "select signature from public.tiktok_bloggers where id = $1::uuid",
+            tiktok_blogger_id,
+        )
+        if not row or not row["signature"]:
+            return ""
+        return str(row["signature"]).strip()
+    finally:
+        await conn.close()
+
+
+def fetch_blogger_profile(tiktok_blogger_id):
+    return asyncio.run(fetch_blogger_profile_async(tiktok_blogger_id))
 
 
 async def fetch_blogger_videos_async(conn, tiktok_blogger_id):
@@ -1225,7 +1328,8 @@ async def list_blogger_tagging_tasks_async(status=None, limit=100, date=None):
             limit ${len(values)}
         """
         rows = await conn.fetch(sql, *values)
-        return [row_to_task(row) for row in rows]
+        tasks = [row_to_task(row) for row in rows]
+        return await enrich_blogger_source_links(conn, tasks)
     finally:
         await conn.close()
 
@@ -1420,18 +1524,22 @@ def analyze_blogger_lite_account(units):
         return {"raw_text": "", "parsed": None, "error": str(exc)}
 
 
-def build_blogger_one_sentence_summary_prompt(base_prompt, units):
+def build_blogger_one_sentence_summary_prompt(base_prompt, units, blogger_profile=""):
+    profile = str(blogger_profile or "").strip() or "无"
     return (
         f"{base_prompt}\n\n"
+        f"以下是该 TikTok 博主主页 profile/bio 文案。它可能包含地点、职业、身份、内容定位、联系方式或自我介绍；"
+        f"如果它提供了重要且可信的信息，请优先用于判断这个人是谁和账号定位，但不要编造 profile 里没有的信息：\n"
+        f"{profile}\n\n"
         f"以下是该账号的 {len(units)} 个 video_description_unit：\n"
         f"{json.dumps(units, ensure_ascii=False, indent=2)}"
     )
 
 
-def analyze_blogger_one_sentence_summary(prompt, units):
+def analyze_blogger_one_sentence_summary(prompt, units, blogger_profile=""):
     try:
         result = call_evolink_text(
-            [{"role": "user", "content": build_blogger_one_sentence_summary_prompt(prompt, units)}]
+            [{"role": "user", "content": build_blogger_one_sentence_summary_prompt(prompt, units, blogger_profile)}]
         )
         text = extract_text(result)
         return {"raw_text": text, "parsed": parse_json_text(text), "error": ""}
@@ -1561,9 +1669,10 @@ def run_blogger_tagging_task(task_id):
         )
 
         units = [item.get("video_description_unit") for item in selected if item.get("video_description_unit")]
+        blogger_profile = fetch_blogger_profile(task["tiktok_blogger_id"])
         account_result = analyze_blogger_lite_account(units)
         account_parsed = require_parsed("blogger_account", account_result)
-        summary_result = analyze_blogger_one_sentence_summary(load_default_prompt(6), units)
+        summary_result = analyze_blogger_one_sentence_summary(load_default_prompt(6), units, blogger_profile)
         account_one_sentence_summary = extract_account_one_sentence_summary(summary_result)
         classification_summary = aggregate_classifications(
             [video_result_to_classification(item) for item in selected]
@@ -1589,6 +1698,7 @@ def run_blogger_tagging_task(task_id):
             raw_outputs={
                 "account_result": account_result,
                 "one_sentence_summary": summary_result,
+                "blogger_profile": blogger_profile,
                 "style_summary": style_summary,
             },
         )
