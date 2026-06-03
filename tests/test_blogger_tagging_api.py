@@ -1,7 +1,20 @@
 import unittest
+import asyncio
 from unittest.mock import patch
 
 import app
+
+
+class FakeAsyncConn:
+    def __init__(self):
+        self.statements = []
+        self.closed = False
+
+    async def execute(self, statement):
+        self.statements.append(statement)
+
+    async def close(self):
+        self.closed = True
 
 
 class BloggerTaggingApiTests(unittest.TestCase):
@@ -33,6 +46,7 @@ class BloggerTaggingApiTests(unittest.TestCase):
         sql = app.blogger_tagging_table_sql().lower()
 
         self.assertIn("create table if not exists public.blogger_tagging_results", sql)
+        self.assertIn("account_one_sentence_summary text", sql)
         self.assertNotIn("alter table public.tiktok_bloggers", sql)
         self.assertNotIn("alter table public.video_sources", sql)
 
@@ -41,6 +55,7 @@ class BloggerTaggingApiTests(unittest.TestCase):
 
         self.assertIn("alter table public.blogger_tagging_results", sql)
         self.assertIn("add column if not exists lock_until", sql)
+        self.assertIn("add column if not exists account_one_sentence_summary text", sql)
         self.assertNotIn("alter table public.tiktok_bloggers", sql)
         self.assertNotIn("alter table public.video_sources", sql)
 
@@ -77,6 +92,34 @@ class BloggerTaggingApiTests(unittest.TestCase):
         self.assertEqual(result["social_identity"], "职场/专业型")
         self.assertEqual(result["occasion"], "Work / Office")
 
+    def test_extract_account_one_sentence_summary_uses_json_field(self):
+        summary = app.extract_account_one_sentence_summary(
+            {
+                "parsed": {
+                    "account_one_sentence_summary": "这是一个 clean girl 气质的职场通勤博主。"
+                },
+                "error": "",
+            }
+        )
+
+        self.assertEqual(summary, "这是一个 clean girl 气质的职场通勤博主。")
+
+    def test_extract_account_one_sentence_summary_is_non_blocking_on_error(self):
+        self.assertEqual(
+            app.extract_account_one_sentence_summary({"parsed": None, "error": "timeout"}),
+            "",
+        )
+
+    def test_build_blogger_one_sentence_summary_prompt_appends_units(self):
+        prompt = app.build_blogger_one_sentence_summary_prompt(
+            "请只输出 JSON",
+            [{"appearance": "office girl", "content": "GRWM"}],
+        )
+
+        self.assertIn("请只输出 JSON", prompt)
+        self.assertIn("video_description_unit", prompt)
+        self.assertIn("office girl", prompt)
+
     def test_internal_callback_url_defaults_to_service_port(self):
         with patch.dict("os.environ", {}, clear=True):
             self.assertEqual(
@@ -91,6 +134,19 @@ class BloggerTaggingApiTests(unittest.TestCase):
         self.assertIn("waiting_videos", sql)
         self.assertIn("next_retry_at", sql)
         self.assertIn("status = 'checking_videos'", sql)
+
+    def test_ensure_all_tagging_tables_runs_blogger_migration(self):
+        conn = FakeAsyncConn()
+
+        async def fake_connect():
+            return conn
+
+        with patch.object(app, "db_connect", fake_connect):
+            asyncio.run(app.ensure_all_tagging_tables_async())
+
+        combined = "\n".join(conn.statements).lower()
+        self.assertIn("add column if not exists account_one_sentence_summary text", combined)
+        self.assertTrue(conn.closed)
 
 
 if __name__ == "__main__":

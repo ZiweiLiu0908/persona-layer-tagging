@@ -53,6 +53,8 @@ class ApiConsoleFrontendTests(unittest.TestCase):
         self.assertIn("task-detail.html?type=video", blogger_videos_js)
         self.assertIn("/api/v1/videos/signed-url/", detail_js)
         self.assertIn("查看该博主视频任务", detail_js)
+        self.assertIn("一句话总结", detail_js)
+        self.assertIn("account_one_sentence_summary", detail_js)
         self.assertIn("返回任务中心", detail_html)
 
     def test_config_page_contains_prompt_api_key_and_concurrency_settings(self):
@@ -72,6 +74,8 @@ class ApiConsoleFrontendTests(unittest.TestCase):
             "负责生成单视频描述单元",
             "负责生成账号基础人口、消费层级、气质心理",
             "负责输出 32 维风格向量",
+            "Prompt 6：博主一句话总结",
+            "account_one_sentence_summary",
             "/api/config",
             "video_worker_count",
             "blogger_worker_count",

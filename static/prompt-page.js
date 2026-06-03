@@ -4,6 +4,7 @@ const promptDefaults = {
   3: window.DEFAULT_PROMPT_3 || "",
   4: window.DEFAULT_PROMPT_4 || "",
   5: window.DEFAULT_PROMPT_5 || "",
+  6: window.DEFAULT_PROMPT_6 || "",
 };
 
 let serverConfig = null;
@@ -28,7 +29,7 @@ function promptValue(number) {
 }
 
 function loadPromptDescriptions(descriptions = {}) {
-  byId("promptExplainList").innerHTML = [1, 2, 3, 4, 5]
+  byId("promptExplainList").innerHTML = [1, 2, 3, 4, 5, 6]
     .map((number) => {
       const text = descriptions[String(number)] || byId(`promptDesc${number}`).textContent;
       byId(`promptDesc${number}`).textContent = text;
@@ -56,7 +57,7 @@ async function loadConfig() {
   byId("bloggerMinVideoCountInput").value = config.blogger_min_video_count || 15;
   byId("videoWorkerCountInput").value = config.video_worker_count || 20;
   byId("bloggerWorkerCountInput").value = config.blogger_worker_count || 5;
-  for (let number = 1; number <= 5; number += 1) {
+  for (let number = 1; number <= 6; number += 1) {
     byId(`prompt${number}`).value = promptValue(number);
   }
   loadPromptDescriptions(config.prompt_descriptions || {});
@@ -65,7 +66,7 @@ async function loadConfig() {
 
 async function saveConfig() {
   const prompts = {};
-  for (let number = 1; number <= 5; number += 1) {
+  for (let number = 1; number <= 6; number += 1) {
     prompts[String(number)] = byId(`prompt${number}`).value;
   }
   const body = {
@@ -94,7 +95,7 @@ async function saveConfig() {
 }
 
 function resetPrompts() {
-  for (let number = 1; number <= 5; number += 1) {
+  for (let number = 1; number <= 6; number += 1) {
     byId(`prompt${number}`).value = promptDefaults[number] || "";
   }
   setMessage("success", "已恢复默认 Prompt，点击保存后生效。");

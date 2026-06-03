@@ -23,6 +23,7 @@
      - `account_personal_tags`：账号级基础人口、消费层级、气质心理、社会身份、Occasion。
      - `account_style_vector`：账号级平均 32 维风格向量。
      - `account_style_signature`：账号级 8-facet 风格指纹。
+     - `account_one_sentence_summary`：基于该博主多个 `video_description_unit` 生成的一句话账号总结，用于快速说明“他是谁、在做什么、为什么有人看、适合怎么复刻成 AI 博主”。
      - `aggregated_social_identity`、`aggregated_occasion`：基于多个视频分类结果聚合出的分布和最终标签。
 
 ## 2. 接口调用说明
@@ -336,6 +337,7 @@ http://136.107.39.145:4190/api/v1/bloggers/tag/33333333-3333-3333-3333-333333333
     "account_personal_tags": {},
     "account_style_vector": {},
     "account_style_signature": {},
+    "account_one_sentence_summary": "这是一个 clean girl 气质的职场通勤博主，主要靠上班日常、GRWM 和质感穿搭建立生活感，适合复刻成 office girl 人设生活型 AI 账号。",
     "aggregated_social_identity": {},
     "aggregated_occasion": {},
     "raw_outputs": {},
@@ -358,6 +360,7 @@ http://136.107.39.145:4190/api/v1/bloggers/tag/33333333-3333-3333-3333-333333333
 | `data.account_personal_tags` | 账号级人设标签。 |
 | `data.account_style_vector` | 账号级平均 32 维风格向量。 |
 | `data.account_style_signature` | 账号级 8-facet 风格指纹。 |
+| `data.account_one_sentence_summary` | 账号级一句话总结，由配置中心的 Prompt 6 基于成功视频的 `video_description_unit` 生成。 |
 | `data.aggregated_social_identity` | 多视频聚合后的社会身份标签和分布。 |
 | `data.aggregated_occasion` | 多视频聚合后的 Occasion 标签和分布。 |
 
@@ -755,6 +758,7 @@ curl "http://127.0.0.1:4190/api/v1/bloggers/tag/33333333-3333-3333-3333-33333333
     "account_personal_tags": {},
     "account_style_vector": {},
     "account_style_signature": {},
+    "account_one_sentence_summary": "这是一个 clean girl 气质的职场通勤博主，主要靠上班日常、GRWM 和质感穿搭建立生活感，适合复刻成 office girl 人设生活型 AI 账号。",
     "aggregated_social_identity": {},
     "aggregated_occasion": {},
     "callback_url": "https://example.com/blogger-callback",
@@ -972,7 +976,7 @@ GET /api/config
 - 博主最少视频数。
 - 视频 Worker 数量。
 - 博主 Worker 数量。
-- 5 个 Prompt 的当前内容和说明。
+- 6 个 Prompt 的当前内容和说明，其中 Prompt 6 用于生成博主 `account_one_sentence_summary`。
 
 ### 9.2 更新配置
 
@@ -997,7 +1001,8 @@ POST /api/config
     "2": "Prompt 2 内容",
     "3": "Prompt 3 内容",
     "4": "Prompt 4 内容",
-    "5": "Prompt 5 内容"
+    "5": "Prompt 5 内容",
+    "6": "Prompt 6 内容"
   }
 }
 ```
@@ -1054,6 +1059,7 @@ data/service_config.json
 - `account_personal_tags`
 - `account_style_vector`
 - `account_style_signature`
+- `account_one_sentence_summary`
 - `aggregated_social_identity`
 - `aggregated_occasion`
 - `raw_outputs`
@@ -1078,4 +1084,4 @@ data/service_config.json
 | `/task-detail.html?type=video&id={video_id}` | 视频任务详情。 |
 | `/task-detail.html?type=blogger&id={tiktok_blogger_id}` | 博主任务详情。 |
 | `/blogger-videos.html?blogger_id={tiktok_blogger_id}` | 某个博主关联的视频打标任务。 |
-| `/prompts.html` | 配置中心和 Prompt 管理。 |
+| `/prompts.html` | 配置中心和 Prompt 管理，包含 Prompt 6 博主一句话总结配置。 |

@@ -129,6 +129,7 @@ PROMPT_DESCRIPTIONS = {
     "3": "负责单视频 10 属性分类：基础人口、消费层级、气质心理、社会身份、Occasion 等单视频标签。",
     "4": "负责输出 32 维风格向量：严格按 STYLE_DIMENSIONS 输出 0-1 分数。",
     "5": "负责输出单视频 StyleSignature：8-facet 细粒度美学指纹。",
+    "6": "负责生成博主一句话总结：基于所有 video_description_unit 输出 account_one_sentence_summary。",
 }
 
 
@@ -216,7 +217,7 @@ def public_config_payload():
     effective_key = current_api_key()
     prompts = {
         str(number): load_default_prompt(number)
-        for number in range(1, 6)
+        for number in range(1, 7)
     }
     return {
         "text_api_url": current_text_api_url(),
@@ -264,7 +265,7 @@ def update_service_config(body):
             config["blogger_worker_count"] = current_blogger_worker_count()
     if isinstance(body.get("prompts"), dict):
         prompts = config.get("prompts") if isinstance(config.get("prompts"), dict) else {}
-        for key in ("1", "2", "3", "4", "5"):
+        for key in ("1", "2", "3", "4", "5", "6"):
             if key in body["prompts"]:
                 prompts[key] = str(body["prompts"][key] or "")
         config["prompts"] = prompts
@@ -422,6 +423,7 @@ create table if not exists public.blogger_tagging_results (
   account_personal_tags jsonb,
   account_style_vector jsonb,
   account_style_signature jsonb,
+  account_one_sentence_summary text,
   aggregated_social_identity jsonb,
   aggregated_occasion jsonb,
   raw_outputs jsonb,
@@ -449,6 +451,7 @@ alter table public.blogger_tagging_results add column if not exists worker_id va
 alter table public.blogger_tagging_results add column if not exists lock_until timestamptz;
 alter table public.blogger_tagging_results add column if not exists attempts integer not null default 0;
 alter table public.blogger_tagging_results add column if not exists next_retry_at timestamptz;
+alter table public.blogger_tagging_results add column if not exists account_one_sentence_summary text;
 """
 
 
@@ -594,6 +597,8 @@ async def ensure_video_tagging_table_async():
     try:
         await conn.execute(video_tagging_table_sql())
         await conn.execute(blogger_tagging_table_sql())
+        await conn.execute(video_tagging_migration_sql())
+        await conn.execute(blogger_tagging_migration_sql())
     finally:
         await conn.close()
 
@@ -606,6 +611,7 @@ async def ensure_blogger_tagging_table_async():
     conn = await db_connect()
     try:
         await conn.execute(blogger_tagging_table_sql())
+        await conn.execute(blogger_tagging_migration_sql())
     finally:
         await conn.close()
 
@@ -615,6 +621,8 @@ async def ensure_all_tagging_tables_async():
     try:
         await conn.execute(video_tagging_table_sql())
         await conn.execute(blogger_tagging_table_sql())
+        await conn.execute(video_tagging_migration_sql())
+        await conn.execute(blogger_tagging_migration_sql())
     finally:
         await conn.close()
 
@@ -1245,6 +1253,7 @@ async def update_blogger_tagging_task_async(task_id, **fields):
             "account_personal_tags",
             "account_style_vector",
             "account_style_signature",
+            "account_one_sentence_summary",
             "aggregated_social_identity",
             "aggregated_occasion",
             "raw_outputs",
@@ -1411,6 +1420,33 @@ def analyze_blogger_lite_account(units):
         return {"raw_text": "", "parsed": None, "error": str(exc)}
 
 
+def build_blogger_one_sentence_summary_prompt(base_prompt, units):
+    return (
+        f"{base_prompt}\n\n"
+        f"以下是该账号的 {len(units)} 个 video_description_unit：\n"
+        f"{json.dumps(units, ensure_ascii=False, indent=2)}"
+    )
+
+
+def analyze_blogger_one_sentence_summary(prompt, units):
+    try:
+        result = call_evolink_text(
+            [{"role": "user", "content": build_blogger_one_sentence_summary_prompt(prompt, units)}]
+        )
+        text = extract_text(result)
+        return {"raw_text": text, "parsed": parse_json_text(text), "error": ""}
+    except Exception as exc:
+        return {"raw_text": "", "parsed": None, "error": str(exc)}
+
+
+def extract_account_one_sentence_summary(result):
+    parsed = result.get("parsed") if isinstance(result, dict) else None
+    if not isinstance(parsed, dict):
+        return ""
+    value = parsed.get("account_one_sentence_summary")
+    return value.strip() if isinstance(value, str) else ""
+
+
 def video_result_to_classification(video_result):
     return {"parsed": video_result.get("personal_tags") or {}, "error": ""}
 
@@ -1527,6 +1563,8 @@ def run_blogger_tagging_task(task_id):
         units = [item.get("video_description_unit") for item in selected if item.get("video_description_unit")]
         account_result = analyze_blogger_lite_account(units)
         account_parsed = require_parsed("blogger_account", account_result)
+        summary_result = analyze_blogger_one_sentence_summary(load_default_prompt(6), units)
+        account_one_sentence_summary = extract_account_one_sentence_summary(summary_result)
         classification_summary = aggregate_classifications(
             [video_result_to_classification(item) for item in selected]
         )
@@ -1545,9 +1583,14 @@ def run_blogger_tagging_task(task_id):
             account_personal_tags=account_personal_tags,
             account_style_vector=style_summary.get("average_style_vector") or {},
             account_style_signature=style_summary.get("account_style_signature") or {},
+            account_one_sentence_summary=account_one_sentence_summary,
             aggregated_social_identity=classification_summary.get("social_identity") or {},
             aggregated_occasion=classification_summary.get("occasion") or {},
-            raw_outputs={"account_result": account_result, "style_summary": style_summary},
+            raw_outputs={
+                "account_result": account_result,
+                "one_sentence_summary": summary_result,
+                "style_summary": style_summary,
+            },
         )
         send_blogger_tagging_callback(task)
     except Exception as exc:

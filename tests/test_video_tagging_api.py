@@ -43,6 +43,8 @@ class VideoTaggingApiTests(unittest.TestCase):
         self.assertIn("api_key_masked", config)
         self.assertNotIn("api_key", config)
         self.assertEqual(config["blogger_min_video_count"], 15)
+        self.assertIn("6", config["prompts"])
+        self.assertIn("6", config["prompt_descriptions"])
 
     def test_validate_video_tagging_request_requires_core_fields_only(self):
         ok, error = app.validate_video_tagging_request(

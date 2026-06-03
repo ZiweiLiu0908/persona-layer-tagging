@@ -168,6 +168,14 @@ function renderTagObject(title, object) {
   ).join("")}</div></section>`;
 }
 
+function renderOneSentenceSummary(summary) {
+  if (!summary) return "";
+  return `<section class="detail-section">
+    <h3>一句话总结</h3>
+    <p>${escapeHtml(summary)}</p>
+  </section>`;
+}
+
 function linkBlock(label, url) {
   if (!url) return "";
   return `<div class="link-block"><span>${escapeHtml(label)}</span><a href="${escapeHtml(url)}" target="_blank">${escapeHtml(url)}</a></div>`;
@@ -223,6 +231,7 @@ async function renderBloggerDetail(task) {
       ${infoCard("创建时间", formatDate(task.created_at))}
       ${infoCard("更新时间", formatDate(task.updated_at))}
     </div></section>
+    ${renderOneSentenceSummary(task.account_one_sentence_summary)}
     ${renderTagObject("账号最终属性", task.account_personal_tags)}
     ${renderTagObject("聚合 social_identity", task.aggregated_social_identity)}
     ${renderTagObject("聚合 occasion", task.aggregated_occasion)}
