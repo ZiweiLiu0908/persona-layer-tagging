@@ -84,16 +84,12 @@ function videoProgress(task) {
   const done = [
     task.video_description_unit,
     task.personal_tags,
-    task.style_vector,
-    task.style_signature,
   ].filter(Boolean).length;
   return `<div class="stage-grid compact-stages">
     <span class="${task.video_description_unit ? "stage-done" : ""}">描述</span>
     <span class="${task.personal_tags ? "stage-done" : ""}">10属性</span>
-    <span class="${task.style_vector ? "stage-done" : ""}">32风格</span>
-    <span class="${task.style_signature ? "stage-done" : ""}">风格指纹</span>
   </div>
-  <p class="muted">${done}/4 阶段</p>`;
+  <p class="muted">${done}/2 阶段</p>`;
 }
 
 function bloggerProgress(task) {
@@ -171,50 +167,6 @@ function renderJsonBlock(title, value) {
   </details>`;
 }
 
-function renderStyleVector(vector) {
-  if (!vector) return "";
-  const rows = Object.entries(vector)
-    .filter(([, value]) => Number(value) > 0)
-    .sort((a, b) => Number(b[1]) - Number(a[1]))
-    .slice(0, 8)
-    .map(([name, value]) => {
-      const pct = Math.round(Number(value) * 100);
-      return `<div class="style-bar">
-        <div><b>${escapeHtml(name)}</b><span>${pct}%</span></div>
-        <i><em style="width:${pct}%"></em></i>
-      </div>`;
-    })
-    .join("");
-  return `<div class="detail-block">
-    <h3>32 风格 Top</h3>
-    <div class="style-bars">${rows || "<p class=\"muted\">暂无</p>"}</div>
-  </div>`;
-}
-
-function renderSignature(signature) {
-  if (!signature) return "";
-  const color = signature.color_palette || {};
-  const material = signature.material_profile || {};
-  const silhouette = signature.silhouette_profile || {};
-  const mood = signature.aesthetic_mood || {};
-  const price = signature.price_positioning || {};
-  const era = signature.era_influence || {};
-  return `<div class="detail-block">
-    <h3>Style Signature</h3>
-    <div class="tag-grid">
-      ${infoCard("主色", color.dominant_colors)}
-      ${infoCard("色温/饱和/对比", [color.temperature, color.saturation, color.contrast].filter(Boolean))}
-      ${infoCard("招牌配色", color.signature_combos)}
-      ${infoCard("面料", material.primary_materials)}
-      ${infoCard("剪影", [silhouette.fit_preference, silhouette.proportion_play, silhouette.structure_level].filter(Boolean))}
-      ${infoCard("氛围", mood.mood_keywords)}
-      ${infoCard("场合", signature.occasion_vector)}
-      ${infoCard("价格", [price.tier, `投资倾向 ${price.investment_vs_trend ?? "无"}`])}
-      ${infoCard("时代", [era.primary_era, era.era_authenticity].filter(Boolean))}
-    </div>
-  </div>`;
-}
-
 function renderPersonalTags(tags) {
   if (!tags) return "";
   const fields = [
@@ -248,13 +200,9 @@ function renderVideoDetail(task) {
       <h3>Description</h3>
       <p>${escapeHtml(task.description || "")}</p>
     </div>
-    ${renderStyleVector(task.style_vector)}
-    ${renderSignature(task.style_signature)}
     <div class="detail-block">
       ${renderJsonBlock("video_description_unit", task.video_description_unit)}
       ${renderJsonBlock("personal_tags", task.personal_tags)}
-      ${renderJsonBlock("完整 style_vector", task.style_vector)}
-      ${renderJsonBlock("完整 style_signature", task.style_signature)}
     </div>`;
 }
 
@@ -274,8 +222,6 @@ function renderBloggerDetail(task) {
     </div>
     <div class="detail-block">${bloggerProgress(task)}</div>
     ${renderPersonalTags(task.account_personal_tags)}
-    ${renderStyleVector(task.account_style_vector)}
-    ${renderSignature(task.account_style_signature)}
     <div class="detail-block">
       ${renderJsonBlock("聚合 social_identity", task.aggregated_social_identity)}
       ${renderJsonBlock("聚合 occasion", task.aggregated_occasion)}

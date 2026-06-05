@@ -65,12 +65,10 @@ function videoProgress(task) {
   const stages = [
     ["描述", task.video_description_unit],
     ["10属性", task.personal_tags],
-    ["32风格", task.style_vector],
-    ["风格指纹", task.style_signature],
   ];
   const done = stages.filter(([, value]) => Boolean(value)).length;
   return `<div class="stage-list">${stages.map(([label, value]) => `<span class="${value ? "done" : ""}">${escapeHtml(label)}</span>`).join("")}</div>
-  <p class="muted">${done}/4 阶段</p>`;
+  <p class="muted">${done}/2 阶段</p>`;
 }
 
 function bloggerProfileLink(task) {

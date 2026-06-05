@@ -1,380 +1,677 @@
-# 人设层打标项目文档
+# Persona Layer Tagging
 
-## 1. 项目介绍
+TikTok 视频 / 博主账号级人设打标服务。
 
-本项目是一个用于 TikTok 内容“人设层”分析和标签生成的 Python HTTP 服务。服务会调用 Evolink/OpenAI 兼容接口，对视频内容、视频文案、hashtag 和博主历史视频进行分析，输出可落库、可查询、可回调的结构化标签结果。
+当前版本只保留 Personal Tags 业务链路：
 
-项目包含两个核心部分：
+- `basic_demographics`
+- `consumption_tier`
+- `temperament_psychology`
+- 聚合后的 `social_identity`
+- 聚合后的 `occasion`
+- `confidence`
+- `account_one_sentence_summary`
 
-1. 视频打标
-   - 输入单条视频的 `video_id`、`gcs_url`、`description` 和 `callback_url`。
-   - 系统异步处理视频，生成：
-     - `video_description_unit`：单视频客观描述单元。
-     - `personal_tags`：单视频人设标签，包括基础人口、消费层级、气质心理、社会身份、Occasion 等。
-     - `style_vector`：32 维风格向量。
-     - `style_signature`：8-facet 细粒度风格指纹。
-   - 处理完成后向调用方提供的 `callback_url` 推送结果状态。
+数据库旧字段保留兼容，但当前业务逻辑不再生成或展示风格向量类结果。
 
-2. 博主打标
-   - 输入 `tiktok_blogger_id`、`callback_url`，可选输入 `min_video_count`。
-   - 系统从数据库读取该博主的视频，至少需要满足指定数量的可用视频。
-   - 若视频未完成打标，会自动提交内部视频打标任务，并等待足够数量的视频成功后再聚合。
-   - 聚合输出账号级标签：
-     - `account_personal_tags`：账号级基础人口、消费层级、气质心理、社会身份、Occasion。
-     - `account_style_vector`：账号级平均 32 维风格向量。
-     - `account_style_signature`：账号级 8-facet 风格指纹。
-     - `account_one_sentence_summary`：基于该博主 TikTok profile/bio 和多个 `video_description_unit` 生成的一句话账号总结，用于快速说明“他是谁、在做什么、为什么有人看、适合怎么复刻成 AI 博主”。
-     - `aggregated_social_identity`、`aggregated_occasion`：基于多个视频分类结果聚合出的分布和最终标签。
+## 服务地址
 
-## 2. 接口调用说明
-
-### 2.1 API 基础地址
-
-当前实际可调用的 API 基础地址：
+线上 API：
 
 ```text
 http://136.107.39.145:4190
 ```
 
-如果服务部署在本机，默认 API 地址为：
+本地默认：
 
 ```text
 http://127.0.0.1:4190
 ```
 
-下面所有 curl 示例默认使用实际服务地址：
+## 核心业务逻辑
+
+整条链路分成 4 步。
 
 ```text
-http://136.107.39.145:4190
+视频 GCS URL + caption
+  -> 单视频证据采集 video_description_unit
+  -> 单视频 Personal Tags 分类 personal_tags
+  -> 博主账号级基础画像 account_personal_tags
+  -> 聚合 social_identity / occasion
 ```
 
-所有提交类接口请求头：
+### 1. 单视频证据采集
 
-```http
-Content-Type: application/json
+函数入口：
+
+```python
+analyze_video_unit(prompt1, video, video_index, api_gate)
 ```
 
-### 2.2 视频打标：提交任务
+输入：
 
-API 地址：
+```json
+{
+  "source_url": "原始 GCS URL",
+  "file_uri": "重新签名后的可访问 GCS URL",
+  "caption": "视频 caption / description",
+  "hashtag": ""
+}
+```
+
+它会调用视频多模态模型，看视频画面，同时结合 caption / hashtag，输出 `video_description_unit`。
+
+这个字段不是最终标签，而是给后续判断用的证据层。
+
+重点采集：
+
+- 人物基础视觉：年龄感、性别呈现、族裔视觉
+- 身材线索：胖瘦、肌肉感、身高感、特殊 body 部位
+- 消费线索：价格、品牌、haul、try-on、商品类型
+- 气质线索：表情、动作、姿态、镜头互动、文案语气
+- 社会身份线索：学生、职场、创作者、运动健康等
+- Occasion 场景线索：日常、通勤、度假、派对、居家等
+
+### 2. 单视频 Personal Tags 分类
+
+函数入口：
+
+```python
+analyze_video_classification(prompt3, video, unit, api_gate)
+```
+
+它基于 `video_description_unit` 做单视频分类，输出 `personal_tags`。
+
+其中当前账号聚合只使用这两个字段：
+
+```json
+{
+  "social_identity_classification": {
+    "label": "",
+    "confidence": "",
+    "evidence": "",
+    "secondary_signals": []
+  },
+  "occasion_classification": {
+    "label": "",
+    "confidence": "",
+    "evidence": "",
+    "secondary_signals": []
+  }
+}
+```
+
+注意：
+
+- 不因为账号来自 TikTok 就默认判断为 `创作者/媒体型`
+- `social_identity` 必须有明确身份线索
+- `occasion` 优先看画面场景，其次看字幕、caption、hashtag
+- 单条视频出现多个强场景且无法分主次，才用 `Remix Occasion`
+
+### 3. 博主账号级基础画像
+
+函数入口：
+
+```python
+analyze_blogger_lite_account(units)
+```
+
+输入是同一个博主的多个 `video_description_unit`。
+
+它只输出 3 类账号级稳定标签：
+
+```json
+{
+  "basic_demographics": {
+    "gender_or_sexuality_presentation": "",
+    "age_range": "",
+    "visual_ethnicity": "",
+    "body_type": "",
+    "height_impression": "",
+    "special_body_parts": []
+  },
+  "consumption_tier": "",
+  "temperament_psychology": "",
+  "confidence": {
+    "basic_demographics": "",
+    "consumption_tier": "",
+    "temperament_psychology": ""
+  }
+}
+```
+
+账号级模型不直接输出：
+
+- `social_identity`
+- `occasion`
+- 风格类结果
+
+原因是：`social_identity` 和 `occasion` 更适合从多条视频的单视频分类里统计聚合，减少单次账号级 LLM 直接拍脑袋。
+
+### 4. 聚合 social_identity / occasion
+
+函数入口：
+
+```python
+aggregate_classifications(classifications)
+```
+
+它会读取每条视频的：
+
+- `social_identity_classification.label`
+- `occasion_classification.label`
+
+然后分别调用：
+
+```python
+distribution_for(classifications, key, remix_label, unclear_label)
+```
+
+聚合规则：
+
+1. 只统计成功分类的视频。
+2. 对每个 label 计数。
+3. `share = round(count * 100 / total) + "%"`。
+4. 如果没有可用 label，返回兜底标签。
+5. 如果 Top1 占比 `>= 50%` 且 Top2 占比 `<= 40%`，最终标签取 Top1。
+6. 否则最终标签取 Remix。
+
+对应兜底：
+
+```python
+social_identity:
+  remix_label = "Remix 身份型"
+  unclear_label = "无明确社会身份型"
+
+occasion:
+  remix_label = "Remix Occasion"
+  unclear_label = "无明显Occasion"
+```
+
+## 字段来源说明
+
+### 字段生成来源总表
+
+| 最终字段 | 生成方式 | 直接输入 | 业务含义 |
+| --- | --- | --- | --- |
+| `basic_demographics` | 账号级 LLM 分析 | 多条 `video_description_unit` | 从多条视频证据里总结稳定的人口视觉画像。 |
+| `consumption_tier` | 账号级 LLM 分析 | 多条 `video_description_unit` | 从多条视频里的价格、品牌、商品和购物线索判断稳定消费层级。 |
+| `temperament_psychology` | 账号级 LLM 分析 | 多条 `video_description_unit` | 从多条视频里的表情、动作、姿态、文案语气判断稳定气质心理。 |
+| `confidence` | 账号级 LLM 分析 | 多条 `video_description_unit` | 只描述上面 3 个账号级 LLM 字段的置信度。 |
+| `social_identity` | 多视频统计聚合 | 每条视频的 `social_identity_classification.label` | 先做单视频身份分类，再统计 15 条视频分布得到账号级身份。 |
+| `occasion` | 多视频统计聚合 | 每条视频的 `occasion_classification.label` | 先做单视频场景分类，再统计 15 条视频分布得到账号级 Occasion。 |
+| `aggregated_social_identity` | 多视频统计聚合 | 每条视频的 `social_identity_classification.label` | 保存 `social_identity` 的统计过程，包括 total、distribution、final_label。 |
+| `aggregated_occasion` | 多视频统计聚合 | 每条视频的 `occasion_classification.label` | 保存 `occasion` 的统计过程，包括 total、distribution、final_label。 |
+
+简单理解：
+
+```text
+通过分析 description_unit 得到：
+  basic_demographics
+  consumption_tier
+  temperament_psychology
+  confidence
+
+通过多条视频分类结果统计得到：
+  social_identity
+  occasion
+  aggregated_social_identity
+  aggregated_occasion
+```
+
+### consumption_tier
+
+来源：账号级 LLM 对多个 `video_description_unit` 的重复消费线索判断。
+
+不是直接统计每条视频的 `consumption_tier_classification`，而是把多个 `video_description_unit` 作为账号整体证据输入给账号级模型，由模型判断账号长期呈现的消费层级。
+
+它依赖的是 description unit 中的这些证据：
+
+- `consumption_tier_evidence.visible_brand_or_price`
+- `consumption_tier_evidence.product_type`
+- `consumption_tier_evidence.possible_consumption_signal`
+- `social_media_info.caption`
+- `social_media_info.hashtags`
+
+主要看：
+
+- 明确价格
+- 可见品牌
+- 商品类型
+- try-on / haul / shopping 推荐
+- caption / hashtag 中的商品或品牌线索
+
+候选值：
+
+```text
+高性价比：$0 - $60
+中端通勤：$60 - $180
+轻奢：$180 - $500
+奢侈品：$500+
+无明显消费层级
+Remix 消费型
+```
+
+没有明确价格、品牌或商品层级时，不凭主观质感猜价格，优先输出 `无明显消费层级`。
+
+### basic_demographics
+
+来源：账号级 LLM 对多个 `video_description_unit` 里的稳定视觉证据判断。
+
+不是单条视频直接决定，也不是简单多数投票。模型会看多条 `video_description_unit` 中反复出现的人物视觉证据，再输出账号级稳定画像。
+
+它依赖的是 description unit 中的这些证据：
+
+- `basic_demographics_evidence.gender_or_sexuality_presentation`
+- `basic_demographics_evidence.age_impression`
+- `basic_demographics_evidence.visual_ethnicity`
+- `body_and_body_part_evidence.body_type_signal`
+- `body_and_body_part_evidence.height_impression`
+- `body_and_body_part_evidence.special_body_focus`
+- `body_and_body_part_evidence.inferred_body_or_fitness_signal`
+
+字段：
+
+```json
+{
+  "gender_or_sexuality_presentation": "女",
+  "age_range": "18-24",
+  "visual_ethnicity": "白人",
+  "body_type": "Skinny",
+  "height_impression": "Tall",
+  "special_body_parts": ["belly", "屁股"]
+}
+```
+
+判断原则：
+
+- 只判断视频里的视觉呈现，不判断真实身份
+- 必须来自多条视频重复出现的稳定信号
+- `special_body_parts` 只有在视频明显突出展示该部位时才记录
+- 只是普通入镜，不算特殊 body 部位
+
+### temperament_psychology
+
+来源：账号级 LLM 对多条视频里的气质表达判断。
+
+不是统计单条视频标签，而是基于多个 `video_description_unit` 的重复气质信号做账号级总结。
+
+它依赖的是 description unit 中的这些证据：
+
+- `temperament_psychology_evidence.visible_temperament_signal`
+- `temperament_psychology_evidence.inferred_temperament_signal`
+- `temperament_psychology_evidence.facial_expression_and_pose`
+- `temperament_psychology_evidence.speech_or_caption_tone`
+- `inferred_signals_from_video_clues.temperament_inference`
+- `single_video_signal_summary.strong_signals_for_account_level_analysis`
+
+主要看：
+
+- 表情
+- 姿态
+- 动作
+- 镜头互动
+- 说话方式
+- caption 文案语气
+- 视频想营造的生活方式
+
+候选值：
+
+```text
+温柔亲和型
+自信性感型
+冷感高级型
+活力阳光型
+搞笑混乱型
+安静内向型
+精英利落型
+叛逆个性型
+无明显气质类型
+Remix 气质型
+```
+
+### social_identity
+
+来源：不是账号级 LLM 直接判断，而是多条单视频 `social_identity_classification.label` 聚合出来。
+
+生成链路：
+
+```text
+每条视频 video_description_unit
+  -> analyze_video_classification()
+  -> social_identity_classification.label
+  -> aggregate_classifications()
+  -> aggregated_social_identity.final_label
+  -> account_personal_tags.social_identity
+```
+
+也就是说，`social_identity` 是通过视频统计得到的，不是通过账号级模型直接分析 `description_unit` 得到的。
+
+为什么这么做：
+
+- 社会身份经常是单视频场景信号，例如校园、办公室、健身、派对。
+- 如果直接让账号级模型判断，容易把少数强视频误当成账号身份。
+- 先单视频分类，再看 15 条视频分布，更能反映账号长期稳定身份。
+
+候选值：
+
+```text
+学生/校园型
+职场/专业型
+创作者/媒体型
+家庭/关系型
+运动/健康型
+艺术/文化型
+社交/派对型
+无明确社会身份型
+Remix 身份型
+```
+
+例子：
+
+```json
+{
+  "total": 15,
+  "final_label": "无明确社会身份型",
+  "distribution": [
+    { "count": 12, "label": "无明确社会身份型", "share": "80%" },
+    { "count": 3, "label": "创作者/媒体型", "share": "20%" }
+  ]
+}
+```
+
+这里 Top1 是 `无明确社会身份型`，占比 80%，Top2 只有 20%，所以最终标签就是 `无明确社会身份型`。
+
+### occasion
+
+来源：不是账号级 LLM 直接判断，而是多条单视频 `occasion_classification.label` 聚合出来。
+
+生成链路：
+
+```text
+每条视频 video_description_unit
+  -> analyze_video_classification()
+  -> occasion_classification.label
+  -> aggregate_classifications()
+  -> aggregated_occasion.final_label
+  -> account_personal_tags.occasion
+```
+
+也就是说，`occasion` 是通过视频统计得到的，不是通过账号级模型直接分析 `description_unit` 得到的。
+
+为什么这么做：
+
+- Occasion 本质上是每条视频的穿搭/内容场景。
+- 一个账号可能同时有日常、度假、派对、约会等多个场景。
+- 用分布统计可以判断账号是单一场景型，还是 Remix Occasion。
+
+候选值：
+
+```text
+Work / Office
+School / Campus
+Everyday Casual
+At-home / Cozy
+Café / Brunch
+Date
+Party / Night-out
+Travel / Transit
+Vacation / Resort
+Sport / Active
+Special Occasion
+无明显Occasion
+Remix Occasion
+```
+
+例子：
+
+```json
+{
+  "total": 15,
+  "final_label": "Remix Occasion",
+  "distribution": [
+    { "count": 7, "label": "Everyday Casual", "share": "47%" },
+    { "count": 5, "label": "Vacation / Resort", "share": "33%" },
+    { "count": 1, "label": "Party / Night-out", "share": "7%" },
+    { "count": 1, "label": "Date", "share": "7%" },
+    { "count": 1, "label": "At-home / Cozy", "share": "7%" }
+  ]
+}
+```
+
+这里 Top1 是 47%，没有达到 50%，所以最终标签是 `Remix Occasion`。
+
+### confidence
+
+来源：账号级 LLM 对 3 个账号基础字段的置信度判断。
+
+它只跟通过 `description_unit` 分析得到的字段绑定：
+
+- `basic_demographics`
+- `consumption_tier`
+- `temperament_psychology`
+
+它不评价统计聚合字段：
+
+- `social_identity`
+- `occasion`
+
+这两个字段的可信度应该看 `distribution` 是否集中。
+
+只包含：
+
+```json
+{
+  "basic_demographics": "high",
+  "consumption_tier": "high",
+  "temperament_psychology": "high"
+}
+```
+
+`social_identity` 和 `occasion` 的可信度不放在这里，因为它们来自统计聚合，可信度看 `distribution`。
+
+## 最终结果结构
+
+博主任务成功后，重点读取：
+
+```json
+{
+  "account_personal_tags": {
+    "consumption_tier": "中端通勤：$60 - $180",
+    "basic_demographics": {
+      "age_range": "18-24",
+      "body_type": "Skinny",
+      "visual_ethnicity": "白人",
+      "height_impression": "Tall",
+      "special_body_parts": ["belly", "屁股"],
+      "gender_or_sexuality_presentation": "女"
+    },
+    "temperament_psychology": "自信性感型",
+    "social_identity": "无明确社会身份型",
+    "occasion": "Remix Occasion",
+    "confidence": {
+      "consumption_tier": "high",
+      "basic_demographics": "high",
+      "temperament_psychology": "high"
+    }
+  },
+  "aggregated_social_identity": {},
+  "aggregated_occasion": {},
+  "account_one_sentence_summary": ""
+}
+```
+
+## API 使用
+
+### 提交单视频打标
 
 ```http
 POST /api/v1/videos/tag
 ```
 
-完整请求地址示例：
-
-```text
-http://136.107.39.145:4190/api/v1/videos/tag
-```
-
-输入：
+请求：
 
 ```json
 {
   "video_id": "11111111-1111-1111-1111-111111111111",
-  "gcs_url": "gs://bucket/path/to/video.mp4",
-  "description": "视频 caption、标题、hashtag 等文本",
-  "callback_url": "https://example.com/video-callback"
+  "gcs_url": "gs://bucket/path/video.mp4",
+  "description": "caption text",
+  "callback_url": "https://example.com/callback"
 }
 ```
 
-输入字段说明：
-
-| 字段 | 类型 | 必填 | 来源数据库/表/字段 | 说明 |
-| --- | --- | --- | --- | --- |
-| `video_id` | string | 是 | 与服务使用同一个 `DATABASE_URL` 指向的数据库；`public.video_sources.id` | 视频 UUID。 |
-| `gcs_url` | string | 是 | `public.video_sources.local_gcs_video_url` | 视频 GCS 文件地址，支持 `gs://...` 或 GCS HTTPS URL。 |
-| `description` | string | 是 | 优先 `public.video_sources.video_desc`，为空则用 `public.video_sources.video_title`，再为空则用 `public.candidate_videos.video_title` | 视频文案、标题、caption、hashtag 等文本。 |
-| `callback_url` | string | 是 | 调用方自行提供 | 任务完成后的回调地址，必须以 `http://` 或 `https://` 开头。 |
-
-对应 SQL 示例：
-
-```sql
-select
-  v.id as video_id,
-  v.local_gcs_video_url as gcs_url,
-  coalesce(v.video_desc, v.video_title, cv.video_title, '') as description
-from public.video_sources v
-left join public.candidate_videos cv on cv.video_source_id = v.id
-where v.id = '<video_id>'::uuid;
-```
-
-注意：`gcs_url` 和 `description` 不能为空，否则视频打标接口会拒绝请求。
-
-输出：
+返回：
 
 ```json
 {
   "code": 0,
-  "message": "received",
-  "task_id": "22222222-2222-2222-2222-222222222222",
-  "video_id": "11111111-1111-1111-1111-111111111111",
+  "message": "video tagging task submitted",
+  "task_id": "",
+  "video_id": "",
   "status": "pending"
 }
 ```
 
-输出字段说明：
-
-| 字段 | 类型 | 说明 |
-| --- | --- | --- |
-| `code` | number | `0` 表示提交成功，非 `0` 表示失败。 |
-| `message` | string | 任务接收结果，如 `received`、`already_running`、`already_processed`。 |
-| `task_id` | string | 本次打标任务 ID。 |
-| `video_id` | string | 调用方传入的视频 ID。 |
-| `status` | string | 当前任务状态，常见值为 `pending`、`running`、`success`、`failed`。 |
-
-curl 示例：
-
-```bash
-curl -X POST "http://136.107.39.145:4190/api/v1/videos/tag" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "video_id": "11111111-1111-1111-1111-111111111111",
-    "gcs_url": "gs://bucket/path/to/video.mp4",
-    "description": "视频 caption、标题、hashtag 等文本",
-    "callback_url": "https://example.com/video-callback"
-  }'
-```
-
-### 2.3 视频打标：查询结果
-
-API 地址：
+查询：
 
 ```http
 GET /api/v1/videos/tag/{video_id}
 ```
 
-完整请求地址示例：
+成功后重点读取：
 
-```text
-http://136.107.39.145:4190/api/v1/videos/tag/11111111-1111-1111-1111-111111111111
-```
+- `data.video_description_unit`
+- `data.personal_tags`
 
-输入：
-
-| 参数 | 位置 | 类型 | 必填 | 说明 |
-| --- | --- | --- | --- | --- |
-| `video_id` | path | string | 是 | 视频 UUID，通常对应 `public.video_sources.id`。 |
-
-输出：
-
-```json
-{
-  "code": 0,
-  "message": "success",
-  "data": {
-    "id": "22222222-2222-2222-2222-222222222222",
-    "video_id": "11111111-1111-1111-1111-111111111111",
-    "gcs_url": "gs://bucket/path/to/video.mp4",
-    "description": "视频 caption、标题、hashtag 等文本",
-    "status": "success",
-    "result_code": 0,
-    "result_message": "video tagging completed",
-    "video_description_unit": {},
-    "personal_tags": {},
-    "style_vector": {},
-    "style_signature": {},
-    "raw_outputs": {},
-    "callback_url": "https://example.com/video-callback",
-    "callback_status": "success",
-    "created_at": "2026-05-29T00:00:00+00:00",
-    "updated_at": "2026-05-29T00:01:00+00:00",
-    "started_at": "2026-05-29T00:00:10+00:00",
-    "finished_at": "2026-05-29T00:01:00+00:00"
-  }
-}
-```
-
-核心输出字段说明：
-
-| 字段 | 说明 |
-| --- | --- |
-| `data.status` | 任务状态。 |
-| `data.video_description_unit` | 单视频客观描述单元。 |
-| `data.personal_tags` | 单视频人设标签。 |
-| `data.style_vector` | 32 维风格向量。 |
-| `data.style_signature` | 8-facet 风格指纹。 |
-| `data.callback_status` | 回调发送状态。 |
-
-### 2.4 博主打标：提交任务
-
-API 地址：
+### 提交博主账号打标
 
 ```http
 POST /api/v1/bloggers/tag
 ```
 
-完整请求地址示例：
-
-```text
-http://136.107.39.145:4190/api/v1/bloggers/tag
-```
-
-输入：
+请求：
 
 ```json
 {
   "tiktok_blogger_id": "33333333-3333-3333-3333-333333333333",
-  "callback_url": "https://example.com/blogger-callback",
+  "callback_url": "https://example.com/callback",
   "min_video_count": 15
 }
 ```
 
-输入字段说明：
-
-| 字段 | 类型 | 必填 | 来源数据库/表/字段 | 说明 |
-| --- | --- | --- | --- | --- |
-| `tiktok_blogger_id` | string | 是 | 与服务使用同一个 `DATABASE_URL` 指向的数据库；`public.tiktok_bloggers.id` | TikTok 博主 UUID，必须存在于 `public.tiktok_bloggers` 表。 |
-| `callback_url` | string | 是 | 调用方自行提供 | 任务完成后的回调地址，必须以 `http://` 或 `https://` 开头。 |
-| `min_video_count` | number | 否 | 调用方自行提供；不传则使用服务配置 `blogger_min_video_count`，默认 `15` | 最少成功视频数，范围 `1-50`。 |
-
-博主打标接口内部会读取该博主的视频数据，读取规则如下：
-
-| 内部字段 | 来源数据库/表/字段 | 说明 |
-| --- | --- | --- |
-| `video_id` | `public.video_sources.id` | 该博主的视频 UUID。 |
-| `gcs_url` | `public.video_sources.local_gcs_video_url` | 后续提交内部视频打标任务使用的视频文件地址。 |
-| `description` | 优先 `public.video_sources.video_desc`，为空则用 `public.video_sources.video_title`，再为空则用 `public.candidate_videos.video_title` | 后续提交内部视频打标任务使用的视频文本。 |
-| 视频归属 | `public.video_sources.tiktok_blogger_id = tiktok_blogger_id` | 只读取当前博主的视频。 |
-| 候选标题关联 | `public.candidate_videos.video_source_id = public.video_sources.id` | 仅在 `video_desc` 和 `video_title` 为空时作为标题兜底。 |
-
-对应 SQL：
-
-```sql
-select
-  v.id as video_id,
-  v.local_gcs_video_url as gcs_url,
-  coalesce(v.video_desc, v.video_title, cv.video_title, '') as description,
-  v.created_at,
-  v.publish_date
-from public.video_sources v
-left join public.candidate_videos cv on cv.video_source_id = v.id
-where v.tiktok_blogger_id = '<tiktok_blogger_id>'::uuid
-order by v.publish_date desc nulls last, v.created_at desc;
-```
-
-服务会过滤掉 `gcs_url` 或 `description` 为空的视频。过滤后的可用视频数必须大于等于 `min_video_count`。
-
-输出：
+返回：
 
 ```json
 {
   "code": 0,
-  "message": "received",
-  "task_id": "44444444-4444-4444-4444-444444444444",
-  "tiktok_blogger_id": "33333333-3333-3333-3333-333333333333",
+  "message": "blogger tagging task submitted",
+  "task_id": "",
+  "tiktok_blogger_id": "",
   "status": "pending",
   "min_video_count": 15,
   "available_video_count": 20
 }
 ```
 
-输出字段说明：
+查询：
 
-| 字段 | 类型 | 说明 |
-| --- | --- | --- |
-| `code` | number | `0` 表示提交成功，非 `0` 表示失败。 |
-| `message` | string | 任务接收结果。 |
-| `task_id` | string | 本次博主打标任务 ID。 |
-| `tiktok_blogger_id` | string | 调用方传入的博主 ID。 |
-| `status` | string | 当前任务状态。 |
-| `min_video_count` | number | 本次任务要求的最少成功视频数。 |
-| `available_video_count` | number | 系统当前查询到的可用视频数。 |
+```http
+GET /api/v1/bloggers/tag/{tiktok_blogger_id}
+```
 
-curl 示例：
+成功后重点读取：
+
+- `data.account_personal_tags`
+- `data.aggregated_social_identity`
+- `data.aggregated_occasion`
+- `data.account_one_sentence_summary`
+
+## Python 调用示例
+
+```python
+import time
+import requests
+
+BASE_URL = "http://136.107.39.145:4190"
+
+
+def submit_blogger_tagging(tiktok_blogger_id, callback_url, min_video_count=15):
+    response = requests.post(
+        f"{BASE_URL}/api/v1/bloggers/tag",
+        json={
+            "tiktok_blogger_id": tiktok_blogger_id,
+            "callback_url": callback_url,
+            "min_video_count": min_video_count,
+        },
+        timeout=20,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    if payload["code"] != 0:
+        raise RuntimeError(payload["message"])
+    return payload
+
+
+def get_blogger_result(tiktok_blogger_id):
+    response = requests.get(
+        f"{BASE_URL}/api/v1/bloggers/tag/{tiktok_blogger_id}",
+        timeout=20,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    if payload["code"] != 0:
+        raise RuntimeError(payload["message"])
+    return payload["data"]
+
+
+def wait_blogger_result(tiktok_blogger_id, interval=10, max_wait=1800):
+    deadline = time.time() + max_wait
+    while time.time() < deadline:
+        task = get_blogger_result(tiktok_blogger_id)
+        if task["status"] in ("success", "failed"):
+            return task
+        time.sleep(interval)
+    raise TimeoutError("blogger tagging timeout")
+
+
+if __name__ == "__main__":
+    blogger_id = "33333333-3333-3333-3333-333333333333"
+    submit_blogger_tagging(
+        tiktok_blogger_id=blogger_id,
+        callback_url="https://example.com/callback",
+    )
+    result = wait_blogger_result(blogger_id)
+
+    print(result["account_personal_tags"])
+    print(result["aggregated_social_identity"])
+    print(result["aggregated_occasion"])
+```
+
+## curl 示例
 
 ```bash
 curl -X POST "http://136.107.39.145:4190/api/v1/bloggers/tag" \
   -H "Content-Type: application/json" \
   -d '{
     "tiktok_blogger_id": "33333333-3333-3333-3333-333333333333",
-    "callback_url": "https://example.com/blogger-callback",
+    "callback_url": "https://example.com/callback",
     "min_video_count": 15
   }'
 ```
 
-### 2.5 博主打标：查询结果
-
-API 地址：
-
-```http
-GET /api/v1/bloggers/tag/{tiktok_blogger_id}
+```bash
+curl "http://136.107.39.145:4190/api/v1/bloggers/tag/33333333-3333-3333-3333-333333333333"
 ```
 
-完整请求地址示例：
+## 回调格式
 
-```text
-http://136.107.39.145:4190/api/v1/bloggers/tag/33333333-3333-3333-3333-333333333333
-```
-
-输入：
-
-| 参数 | 位置 | 类型 | 必填 | 说明 |
-| --- | --- | --- | --- | --- |
-| `tiktok_blogger_id` | path | string | 是 | TikTok 博主 UUID，对应 `public.tiktok_bloggers.id`。 |
-
-输出：
-
-```json
-{
-  "code": 0,
-  "message": "success",
-  "data": {
-    "id": "44444444-4444-4444-4444-444444444444",
-    "tiktok_blogger_id": "33333333-3333-3333-3333-333333333333",
-    "status": "success",
-    "result_code": 0,
-    "result_message": "blogger tagging completed",
-    "min_video_count": 15,
-    "available_video_count": 20,
-    "usable_video_count": 20,
-    "successful_video_count": 15,
-    "failed_video_count": 0,
-    "submitted_video_count": 15,
-    "selected_video_ids": [],
-    "video_task_ids": [],
-    "account_personal_tags": {},
-    "account_style_vector": {},
-    "account_style_signature": {},
-    "account_one_sentence_summary": "这是一个 clean girl 气质的职场通勤博主，主要靠上班日常、GRWM 和质感穿搭建立生活感，适合复刻成 office girl 人设生活型 AI 账号。",
-    "aggregated_social_identity": {},
-    "aggregated_occasion": {},
-    "raw_outputs": {},
-    "callback_url": "https://example.com/blogger-callback",
-    "callback_status": "success",
-    "created_at": "2026-05-29T00:00:00+00:00",
-    "updated_at": "2026-05-29T00:05:00+00:00",
-    "started_at": "2026-05-29T00:00:10+00:00",
-    "finished_at": "2026-05-29T00:05:00+00:00"
-  }
-}
-```
-
-核心输出字段说明：
-
-| 字段 | 说明 |
-| --- | --- |
-| `data.status` | 博主任务状态。 |
-| `data.successful_video_count` | 成功参与聚合的视频数量。 |
-| `data.account_personal_tags` | 账号级人设标签。 |
-| `data.account_style_vector` | 账号级平均 32 维风格向量。 |
-| `data.account_style_signature` | 账号级 8-facet 风格指纹。 |
-| `data.account_one_sentence_summary` | 账号级一句话总结，由配置中心的 Prompt 6 基于 TikTok profile/bio 和成功视频的 `video_description_unit` 生成。 |
-| `data.aggregated_social_identity` | 多视频聚合后的社会身份标签和分布。 |
-| `data.aggregated_occasion` | 多视频聚合后的 Occasion 标签和分布。 |
-
-### 2.6 回调输出
-
-视频打标完成后，服务会请求调用方提供的 `callback_url`。
-
-视频成功回调输出：
+视频任务完成：
 
 ```json
 {
   "event": "video_tagging.completed",
-  "video_id": "11111111-1111-1111-1111-111111111111",
-  "task_id": "22222222-2222-2222-2222-222222222222",
+  "video_id": "",
+  "task_id": "",
   "status": "success",
   "code": 0,
   "message": "video tagging completed",
@@ -382,13 +679,13 @@ http://136.107.39.145:4190/api/v1/bloggers/tag/33333333-3333-3333-3333-333333333
 }
 ```
 
-博主成功回调输出：
+博主任务完成：
 
 ```json
 {
   "event": "blogger_tagging.completed",
-  "tiktok_blogger_id": "33333333-3333-3333-3333-333333333333",
-  "task_id": "44444444-4444-4444-4444-444444444444",
+  "tiktok_blogger_id": "",
+  "task_id": "",
   "status": "success",
   "code": 0,
   "message": "blogger tagging completed",
@@ -396,715 +693,41 @@ http://136.107.39.145:4190/api/v1/bloggers/tag/33333333-3333-3333-3333-333333333
 }
 ```
 
-失败时，`event` 会变为 `video_tagging.failed` 或 `blogger_tagging.failed`，`status` 为 `failed`，`code` 和 `error_detail` 会返回具体错误信息。
+## 最小代码结构
 
-## 3. 运行方式
+核心后端函数：
 
-### 3.1 环境变量
-
-服务依赖以下环境变量，可放在 `.env` 文件中：
-
-```bash
-EVOLINK_API_KEY=你的接口密钥
-DATABASE_URL=postgresql://user:password@host:port/database
-EVOLINK_TEXT_API_URL=https://direct.evolink.ai/v1/chat/completions
-EVOLINK_TEXT_MODEL=gemini-3.5-flash
-EVOLINK_VIDEO_API_URL=https://direct.evolink.ai/v1/chat/completions
-PORT=4190
-HOST=0.0.0.0
+```text
+app.py
+  analyze_video_unit()
+  analyze_video_classification()
+  analyze_blogger_lite_account()
+  aggregate_classifications()
+  distribution_for()
+  merge_blogger_personal_tags()
+  run_video_tagging_task()
+  run_blogger_tagging_task()
 ```
 
-可选配置：
+核心 Prompt：
 
-```bash
-VIDEO_WORKER_COUNT=20
-BLOGGER_WORKER_COUNT=5
-QUEUE_POLL_SECONDS=2
-INTERNAL_CALLBACK_URL=http://127.0.0.1:4190/api/internal/tagging-callback
+```text
+static/prompts.js
+  DEFAULT_PROMPT_1: 单视频证据采集
+  DEFAULT_PROMPT_2: 账号级基础画像
+  DEFAULT_PROMPT_3: 单视频 Personal Tags 分类
+  DEFAULT_PROMPT_6: 博主一句话总结
 ```
 
-### 3.2 本地启动
+## 本地运行
 
 ```bash
 pip install -r requirements.txt
 python app.py
 ```
 
-服务默认监听：
+打开：
 
 ```text
 http://127.0.0.1:4190
 ```
-
-### 3.3 Docker Compose 启动
-
-```bash
-docker compose up -d --build
-```
-
-## 4. 接口通用约定
-
-### 4.1 请求格式
-
-所有提交类接口均使用：
-
-```http
-Content-Type: application/json
-```
-
-### 4.2 通用响应格式
-
-成功或业务失败通常返回：
-
-```json
-{
-  "code": 0,
-  "message": "success",
-  "data": {}
-}
-```
-
-其中：
-
-- `code = 0` 表示成功。
-- `code != 0` 表示校验失败、任务不存在、业务失败或服务异常。
-- 部分提交接口会直接返回 `task_id`、`status` 等顶层字段。
-
-### 4.3 任务状态
-
-视频任务常见状态：
-
-- `pending`：已接收，等待 Worker 处理。
-- `running`：正在处理。
-- `success`：处理成功。
-- `failed`：处理失败。
-
-博主任务常见状态：
-
-- `pending`：已接收。
-- `checking_videos`：正在检查博主视频。
-- `waiting_videos`：等待内部视频打标任务完成。
-- `aggregating`：正在聚合账号结果。
-- `success`：处理成功。
-- `failed`：处理失败。
-
-## 5. 视频打标接口
-
-### 5.1 提交视频打标任务
-
-```http
-POST /api/v1/videos/tag
-```
-
-请求体：
-
-```json
-{
-  "video_id": "11111111-1111-1111-1111-111111111111",
-  "gcs_url": "gs://bucket/path/to/video.mp4",
-  "description": "视频 caption 和 hashtag 文本",
-  "callback_url": "https://example.com/video-callback"
-}
-```
-
-字段说明：
-
-| 字段 | 必填 | 说明 |
-| --- | --- | --- |
-| `video_id` | 是 | 视频 UUID。 |
-| `gcs_url` | 是 | 视频文件地址，支持 `gs://...` 或 GCS HTTPS URL。 |
-| `description` | 是 | 视频文案、caption、hashtag 等文本。 |
-| `callback_url` | 是 | 任务完成后回调地址，必须以 `http://` 或 `https://` 开头。 |
-
-不支持字段：
-
-- `source_url`
-- `request_id`
-- `local_video_url`
-
-成功响应：
-
-```json
-{
-  "code": 0,
-  "message": "received",
-  "task_id": "22222222-2222-2222-2222-222222222222",
-  "video_id": "11111111-1111-1111-1111-111111111111",
-  "status": "pending"
-}
-```
-
-如果同一个 `video_id` 已经成功处理，会返回：
-
-```json
-{
-  "code": 0,
-  "message": "already_processed",
-  "task_id": "22222222-2222-2222-2222-222222222222",
-  "video_id": "11111111-1111-1111-1111-111111111111",
-  "status": "success"
-}
-```
-
-常见错误：
-
-| code | message |
-| --- | --- |
-| `4001` | `video_id is required` |
-| `4002` | `gcs_url is required` |
-| `4003` | `description is required` |
-| `4004` | `callback_url is required` 或 `callback_url must start with http:// or https://` |
-| `4005` | `video_id must be a UUID` |
-| `4006` | `unsupported fields: ...` |
-| `5000` | 服务异常。 |
-
-### 5.2 查询单个视频打标结果
-
-```http
-GET /api/v1/videos/tag/{video_id}
-```
-
-示例：
-
-```bash
-curl "http://127.0.0.1:4190/api/v1/videos/tag/11111111-1111-1111-1111-111111111111"
-```
-
-成功响应：
-
-```json
-{
-  "code": 0,
-  "message": "success",
-  "data": {
-    "id": "22222222-2222-2222-2222-222222222222",
-    "video_id": "11111111-1111-1111-1111-111111111111",
-    "gcs_url": "gs://bucket/path/to/video.mp4",
-    "description": "视频 caption 和 hashtag 文本",
-    "status": "success",
-    "result_code": 0,
-    "result_message": "video tagging completed",
-    "video_description_unit": {},
-    "personal_tags": {},
-    "style_vector": {},
-    "style_signature": {},
-    "callback_url": "https://example.com/video-callback",
-    "callback_status": "success",
-    "created_at": "2026-05-29T00:00:00+00:00",
-    "updated_at": "2026-05-29T00:01:00+00:00"
-  }
-}
-```
-
-未找到：
-
-```json
-{
-  "code": 4041,
-  "message": "video tagging result not found"
-}
-```
-
-### 5.3 查询视频任务列表
-
-```http
-GET /api/v1/video-tagging/tasks
-```
-
-查询参数：
-
-| 参数 | 必填 | 说明 |
-| --- | --- | --- |
-| `status` | 否 | 按状态过滤，如 `pending`、`running`、`success`、`failed`。 |
-| `limit` | 否 | 返回数量，默认 `100`，最大 `500`。 |
-| `date` | 否 | 按北京时间日期过滤，格式 `YYYY-MM-DD`。 |
-
-示例：
-
-```bash
-curl "http://127.0.0.1:4190/api/v1/video-tagging/tasks?status=success&limit=50&date=2026-05-29"
-```
-
-响应：
-
-```json
-{
-  "code": 0,
-  "message": "success",
-  "data": {
-    "tasks": []
-  }
-}
-```
-
-### 5.4 获取视频新签名 GCS URL
-
-```http
-GET /api/v1/videos/signed-url/{video_id}
-```
-
-用途：
-
-- 当原始 `gcs_url` 是 GCS 地址时，服务会生成或刷新可访问的签名 URL。
-- 如果 URL 已经是新鲜的签名 URL，会直接返回原 URL。
-
-响应：
-
-```json
-{
-  "code": 0,
-  "message": "success",
-  "data": {
-    "video_id": "11111111-1111-1111-1111-111111111111",
-    "gcs_url": "gs://bucket/path/to/video.mp4",
-    "signed_gcs_url": "https://storage.googleapis.com/...",
-    "fresh": true
-  }
-}
-```
-
-## 6. 博主打标接口
-
-### 6.1 提交博主打标任务
-
-```http
-POST /api/v1/bloggers/tag
-```
-
-请求体：
-
-```json
-{
-  "tiktok_blogger_id": "33333333-3333-3333-3333-333333333333",
-  "callback_url": "https://example.com/blogger-callback",
-  "min_video_count": 15
-}
-```
-
-字段说明：
-
-| 字段 | 必填 | 说明 |
-| --- | --- | --- |
-| `tiktok_blogger_id` | 是 | TikTok 博主 UUID，必须存在于 `public.tiktok_bloggers` 表。 |
-| `callback_url` | 是 | 任务完成后回调地址，必须以 `http://` 或 `https://` 开头。 |
-| `min_video_count` | 否 | 最少成功视频数，默认 `15`，范围 `1-50`。 |
-
-成功响应：
-
-```json
-{
-  "code": 0,
-  "message": "received",
-  "task_id": "44444444-4444-4444-4444-444444444444",
-  "tiktok_blogger_id": "33333333-3333-3333-3333-333333333333",
-  "status": "pending",
-  "min_video_count": 15,
-  "available_video_count": 20
-}
-```
-
-常见错误：
-
-| code | message |
-| --- | --- |
-| `4001` | `tiktok_blogger_id is required` |
-| `4002` | `callback_url is required` |
-| `4003` | `tiktok_blogger_id must be a UUID` |
-| `4004` | `callback_url must start with http:// or https://` |
-| `4201` | `blogger not found` |
-| `4202` | `insufficient videos` |
-| `5000` | 服务异常。 |
-
-视频不足时响应示例：
-
-```json
-{
-  "code": 4202,
-  "message": "insufficient videos",
-  "available_video_count": 8,
-  "required_video_count": 15
-}
-```
-
-### 6.2 查询单个博主打标结果
-
-```http
-GET /api/v1/bloggers/tag/{tiktok_blogger_id}
-```
-
-示例：
-
-```bash
-curl "http://127.0.0.1:4190/api/v1/bloggers/tag/33333333-3333-3333-3333-333333333333"
-```
-
-成功响应：
-
-```json
-{
-  "code": 0,
-  "message": "success",
-  "data": {
-    "id": "44444444-4444-4444-4444-444444444444",
-    "tiktok_blogger_id": "33333333-3333-3333-3333-333333333333",
-    "status": "success",
-    "result_code": 0,
-    "result_message": "blogger tagging completed",
-    "min_video_count": 15,
-    "available_video_count": 20,
-    "successful_video_count": 15,
-    "selected_video_ids": [],
-    "video_task_ids": [],
-    "account_personal_tags": {},
-    "account_style_vector": {},
-    "account_style_signature": {},
-    "account_one_sentence_summary": "这是一个 clean girl 气质的职场通勤博主，主要靠上班日常、GRWM 和质感穿搭建立生活感，适合复刻成 office girl 人设生活型 AI 账号。",
-    "aggregated_social_identity": {},
-    "aggregated_occasion": {},
-    "callback_url": "https://example.com/blogger-callback",
-    "callback_status": "success"
-  }
-}
-```
-
-未找到：
-
-```json
-{
-  "code": 4042,
-  "message": "blogger tagging result not found"
-}
-```
-
-### 6.3 查询博主任务列表
-
-```http
-GET /api/v1/blogger-tagging/tasks
-```
-
-查询参数：
-
-| 参数 | 必填 | 说明 |
-| --- | --- | --- |
-| `status` | 否 | 按状态过滤。 |
-| `limit` | 否 | 返回数量，默认 `100`，最大 `500`。 |
-| `date` | 否 | 按北京时间日期过滤，格式 `YYYY-MM-DD`。 |
-
-示例：
-
-```bash
-curl "http://127.0.0.1:4190/api/v1/blogger-tagging/tasks?status=success&limit=50"
-```
-
-响应：
-
-```json
-{
-  "code": 0,
-  "message": "success",
-  "data": {
-    "tasks": [
-      {
-        "id": "44444444-4444-4444-4444-444444444444",
-        "tiktok_blogger_id": "33333333-3333-3333-3333-333333333333",
-        "status": "success",
-        "blogger_url": "https://www.tiktok.com/@creator",
-        "source_video_urls": [
-          "https://www.tiktok.com/@creator/video/111"
-        ],
-        "source_video_count": 18
-      }
-    ]
-  }
-}
-```
-
-`blogger_url` 来自 `public.tiktok_bloggers.blogger_url`；`source_video_urls` 来自 `public.video_sources.source_url`，为空时兜底 `video_url` / `candidate_videos.video_url`，用于首页博主任务列表展示 TikTok 原主页和原视频链接。
-
-### 6.4 查询某个博主关联的视频打标任务
-
-```http
-GET /api/v1/bloggers/{tiktok_blogger_id}/video-tagging/tasks
-```
-
-查询参数：
-
-| 参数 | 必填 | 说明 |
-| --- | --- | --- |
-| `status` | 否 | 按视频任务状态过滤。 |
-| `limit` | 否 | 返回数量，默认 `100`，最大 `500`。 |
-| `date` | 否 | 按北京时间日期过滤，格式 `YYYY-MM-DD`。 |
-
-示例：
-
-```bash
-curl "http://127.0.0.1:4190/api/v1/bloggers/33333333-3333-3333-3333-333333333333/video-tagging/tasks"
-```
-
-响应：
-
-```json
-{
-  "code": 0,
-  "message": "success",
-  "data": {
-    "tasks": [
-      {
-        "id": "22222222-2222-2222-2222-222222222222",
-        "video_id": "33333333-3333-3333-3333-333333333333",
-        "status": "success",
-        "source_url": "https://www.tiktok.com/@creator/video/111",
-        "blogger_url": "https://www.tiktok.com/@creator"
-      }
-    ]
-  }
-}
-```
-
-`blogger_url` 来自 `public.tiktok_bloggers.blogger_url`；`source_url` 来自 `public.video_sources.source_url`，为空时兜底 `video_url` / `candidate_videos.video_url`，用于博主视频任务页展示 TikTok 博主主页和原视频链接。
-
-## 7. 综合任务查询接口
-
-### 7.1 查询视频和博主任务
-
-```http
-GET /api/v1/tagging/tasks
-```
-
-查询参数：
-
-| 参数 | 必填 | 说明 |
-| --- | --- | --- |
-| `type` | 否 | `video` 只查视频任务，`blogger` 只查博主任务，不传则都查。 |
-| `status` | 否 | 按状态过滤。 |
-| `limit` | 否 | 每类任务返回数量，默认 `100`，最大 `500`。 |
-| `date` | 否 | 按北京时间日期过滤，格式 `YYYY-MM-DD`。 |
-
-示例：
-
-```bash
-curl "http://127.0.0.1:4190/api/v1/tagging/tasks?type=video&status=success&limit=20"
-```
-
-响应：
-
-```json
-{
-  "code": 0,
-  "message": "success",
-  "data": {
-    "video_tasks": [],
-    "blogger_tasks": []
-  }
-}
-```
-
-## 8. 回调说明
-
-### 8.1 视频打标回调
-
-视频任务完成或失败后，服务会向提交任务时传入的 `callback_url` 发送 `POST` 请求。
-
-成功回调：
-
-```json
-{
-  "event": "video_tagging.completed",
-  "video_id": "11111111-1111-1111-1111-111111111111",
-  "task_id": "22222222-2222-2222-2222-222222222222",
-  "status": "success",
-  "code": 0,
-  "message": "video tagging completed",
-  "error_detail": ""
-}
-```
-
-失败回调：
-
-```json
-{
-  "event": "video_tagging.failed",
-  "video_id": "11111111-1111-1111-1111-111111111111",
-  "task_id": "22222222-2222-2222-2222-222222222222",
-  "status": "failed",
-  "code": 5001,
-  "message": "Missing EVOLINK_API_KEY",
-  "error_detail": "Missing EVOLINK_API_KEY"
-}
-```
-
-### 8.2 博主打标回调
-
-博主任务完成或失败后，服务会向提交任务时传入的 `callback_url` 发送 `POST` 请求。
-
-成功回调：
-
-```json
-{
-  "event": "blogger_tagging.completed",
-  "tiktok_blogger_id": "33333333-3333-3333-3333-333333333333",
-  "task_id": "44444444-4444-4444-4444-444444444444",
-  "status": "success",
-  "code": 0,
-  "message": "blogger tagging completed",
-  "error_detail": ""
-}
-```
-
-失败回调：
-
-```json
-{
-  "event": "blogger_tagging.failed",
-  "tiktok_blogger_id": "33333333-3333-3333-3333-333333333333",
-  "task_id": "44444444-4444-4444-4444-444444444444",
-  "status": "failed",
-  "code": 4202,
-  "message": "insufficient videos",
-  "error_detail": "available videos 8 < required 15"
-}
-```
-
-### 8.3 回调接收要求
-
-调用方的回调服务需要：
-
-- 接收 `POST` 请求。
-- 支持 `Content-Type: application/json`。
-- 建议返回 `2xx` 状态码表示接收成功。
-
-服务会记录：
-
-- `callback_status`
-- `callback_response_code`
-- `callback_response_body`
-- `callback_attempts`
-- `last_callback_at`
-
-## 9. 配置接口
-
-### 9.1 查询当前配置
-
-```http
-GET /api/config
-```
-
-响应包含：
-
-- 文本模型接口地址。
-- 视频模型接口地址。
-- 模型名称。
-- API Key 是否已配置和脱敏展示。
-- 默认并发。
-- 博主最少视频数。
-- 视频 Worker 数量。
-- 博主 Worker 数量。
-- 6 个 Prompt 的当前内容和说明，其中 Prompt 6 用于基于 TikTok profile/bio 和 `video_description_unit` 生成博主 `account_one_sentence_summary`。
-
-### 9.2 更新配置
-
-```http
-POST /api/config
-```
-
-请求体示例：
-
-```json
-{
-  "api_key": "new-api-key",
-  "text_api_url": "https://direct.evolink.ai/v1/chat/completions",
-  "text_model": "gemini-3.5-flash",
-  "video_api_url": "https://direct.evolink.ai/v1/chat/completions",
-  "default_api_concurrency": 200,
-  "blogger_min_video_count": 15,
-  "video_worker_count": 20,
-  "blogger_worker_count": 5,
-  "prompts": {
-    "1": "Prompt 1 内容",
-    "2": "Prompt 2 内容",
-    "3": "Prompt 3 内容",
-    "4": "Prompt 4 内容",
-    "5": "Prompt 5 内容",
-    "6": "Prompt 6 内容"
-  }
-}
-```
-
-配置会保存到：
-
-```text
-data/service_config.json
-```
-
-## 10. 数据库表
-
-服务会自动创建或迁移两个结果表：
-
-### 10.1 `public.video_tagging_results`
-
-用于保存视频打标任务和结果，核心字段包括：
-
-- `id`
-- `video_id`
-- `gcs_url`
-- `description`
-- `status`
-- `result_code`
-- `result_message`
-- `video_description_unit`
-- `personal_tags`
-- `style_vector`
-- `style_signature`
-- `raw_outputs`
-- `callback_url`
-- `callback_status`
-- `source_type`
-- `source_blogger_task_id`
-- `source_tiktok_blogger_id`
-- `created_at`
-- `updated_at`
-
-### 10.2 `public.blogger_tagging_results`
-
-用于保存博主打标任务和聚合结果，核心字段包括：
-
-- `id`
-- `tiktok_blogger_id`
-- `status`
-- `result_code`
-- `result_message`
-- `min_video_count`
-- `available_video_count`
-- `successful_video_count`
-- `failed_video_count`
-- `selected_video_ids`
-- `video_task_ids`
-- `account_personal_tags`
-- `account_style_vector`
-- `account_style_signature`
-- `account_one_sentence_summary`
-- `aggregated_social_identity`
-- `aggregated_occasion`
-- `raw_outputs`
-- `callback_url`
-- `callback_status`
-- `created_at`
-- `updated_at`
-
-博主打标还依赖已有业务表：
-
-- `public.tiktok_bloggers`
-- `public.video_sources`
-- `public.candidate_videos`
-
-## 11. 前端页面
-
-项目自带轻量级管理页面：
-
-| 页面 | 说明 |
-| --- | --- |
-| `/` | 任务中心，展示视频打标和博主打标任务。 |
-| `/task-detail.html?type=video&id={video_id}` | 视频任务详情。 |
-| `/task-detail.html?type=blogger&id={tiktok_blogger_id}` | 博主任务详情。 |
-| `/blogger-videos.html?blogger_id={tiktok_blogger_id}` | 某个博主关联的视频打标任务。 |
-| `/prompts.html` | 配置中心和 Prompt 管理，包含 Prompt 6 博主一句话总结配置。 |

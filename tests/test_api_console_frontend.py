@@ -38,8 +38,8 @@ class ApiConsoleFrontendTests(unittest.TestCase):
         self.assertIn("bloggerTabBtn", html)
         self.assertIn("配置中心", html)
         self.assertIn("新签名 GCS URL", detail_js)
-        self.assertIn("32 风格向量", detail_js)
-        self.assertIn("StyleSignature 8 Facets", detail_js)
+        self.assertNotIn("32 风格向量", detail_js)
+        self.assertNotIn("StyleSignature", detail_js)
         self.assertIn('href="/prompts.html"', html)
         self.assertNotIn("提交视频打标", html + js)
         self.assertNotIn("提交博主打标", html + js)
@@ -83,7 +83,6 @@ class ApiConsoleFrontendTests(unittest.TestCase):
             "博主 Worker 数量",
             "负责生成单视频描述单元",
             "负责生成账号基础人口、消费层级、气质心理",
-            "负责输出 32 维风格向量",
             "Prompt 6：博主一句话总结",
             "account_one_sentence_summary",
             "profile/bio",
@@ -92,6 +91,11 @@ class ApiConsoleFrontendTests(unittest.TestCase):
             "blogger_worker_count",
         ):
             self.assertIn(text, combined)
+
+        self.assertNotIn("Prompt 4", combined)
+        self.assertNotIn("Prompt 5", combined)
+        self.assertNotIn("32 维风格向量", combined)
+        self.assertNotIn("StyleSignature", combined)
 
 
 if __name__ == "__main__":

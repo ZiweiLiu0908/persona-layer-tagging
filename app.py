@@ -27,41 +27,6 @@ CURRENT_BATCH_PATH = DATA_DIR / "current_batch.json"
 CURRENT_JOB_PATH = DATA_DIR / "current_job.json"
 SERVICE_CONFIG_PATH = DATA_DIR / "service_config.json"
 
-STYLE_NAMES = [
-    "americana",
-    "athleisure",
-    "avant_garde",
-    "bohemian",
-    "casual",
-    "classic",
-    "clean",
-    "coquette",
-    "cottagecore",
-    "cozy",
-    "dark_academia",
-    "edgy",
-    "elegant",
-    "gorpcore",
-    "luxe",
-    "minimal",
-    "moto",
-    "premium",
-    "preppy",
-    "quiet_luxury",
-    "relaxed",
-    "resort",
-    "romantic",
-    "sport",
-    "streetwear",
-    "sustainable",
-    "tailored",
-    "technical",
-    "vintage",
-    "western",
-    "workwear",
-    "y2k",
-]
-
 EXCEL_PATH = Path(
     os.getenv(
         "VIDEO_EXCEL_PATH",
@@ -127,8 +92,6 @@ PROMPT_DESCRIPTIONS = {
     "1": "负责生成单视频描述单元：从视频、caption、hashtag 提取可用于后续账号判断的客观证据。",
     "2": "负责生成账号基础人口、消费层级、气质心理：只吃 15 个 video_description_unit，不直接生成 social_identity / occasion / style。",
     "3": "负责单视频 10 属性分类：基础人口、消费层级、气质心理、社会身份、Occasion 等单视频标签。",
-    "4": "负责输出 32 维风格向量：严格按 STYLE_DIMENSIONS 输出 0-1 分数。",
-    "5": "负责输出单视频 StyleSignature：8-facet 细粒度美学指纹。",
     "6": "负责生成博主一句话总结：基于 TikTok profile/bio 和所有 video_description_unit 输出 account_one_sentence_summary。",
 }
 
@@ -217,7 +180,7 @@ def public_config_payload():
     effective_key = current_api_key()
     prompts = {
         str(number): load_default_prompt(number)
-        for number in range(1, 7)
+        for number in (1, 2, 3, 6)
     }
     return {
         "text_api_url": current_text_api_url(),
@@ -1559,14 +1522,6 @@ def video_result_to_classification(video_result):
     return {"parsed": video_result.get("personal_tags") or {}, "error": ""}
 
 
-def video_result_to_style_vector(video_result):
-    return {"parsed": video_result.get("style_vector") or {}, "error": ""}
-
-
-def video_result_to_style_signature(video_result):
-    return {"parsed": video_result.get("style_signature") or {}, "error": ""}
-
-
 def submit_internal_video_task(video, callback_url, blogger_task_id=None, tiktok_blogger_id=None):
     return submit_video_tagging_task(
         {
@@ -1677,10 +1632,6 @@ def run_blogger_tagging_task(task_id):
         classification_summary = aggregate_classifications(
             [video_result_to_classification(item) for item in selected]
         )
-        style_summary = aggregate_style_results(
-            [video_result_to_style_vector(item) for item in selected],
-            [video_result_to_style_signature(item) for item in selected],
-        )
         account_personal_tags = merge_blogger_personal_tags(account_parsed, classification_summary)
         task = update_blogger_tagging_task(
             task_id,
@@ -1690,8 +1641,6 @@ def run_blogger_tagging_task(task_id):
             error_code=None,
             error_message=None,
             account_personal_tags=account_personal_tags,
-            account_style_vector=style_summary.get("average_style_vector") or {},
-            account_style_signature=style_summary.get("account_style_signature") or {},
             account_one_sentence_summary=account_one_sentence_summary,
             aggregated_social_identity=classification_summary.get("social_identity") or {},
             aggregated_occasion=classification_summary.get("occasion") or {},
@@ -1699,7 +1648,6 @@ def run_blogger_tagging_task(task_id):
                 "account_result": account_result,
                 "one_sentence_summary": summary_result,
                 "blogger_profile": blogger_profile,
-                "style_summary": style_summary,
             },
         )
         send_blogger_tagging_callback(task)
@@ -1820,8 +1768,6 @@ def run_video_tagging_task(task_id):
         api_gate = threading.BoundedSemaphore(1)
         prompt1 = load_default_prompt(1)
         prompt3 = load_default_prompt(3)
-        prompt4 = load_default_prompt(4)
-        prompt5 = load_default_prompt(5)
 
         unit = analyze_video_unit(prompt1, video, 1, api_gate)
         raw_outputs["video_description_unit"] = unit
@@ -1830,14 +1776,6 @@ def run_video_tagging_task(task_id):
         classification = analyze_video_classification(prompt3, video, unit, api_gate)
         raw_outputs["personal_tags"] = classification
         personal_tags = require_parsed("personal_tags", classification)
-
-        style_vector = analyze_video_style_vector(prompt4, video, unit, api_gate)
-        raw_outputs["style_vector"] = style_vector
-        style_vector_parsed = require_parsed("style_vector", style_vector)
-
-        style_signature = analyze_video_style_signature(prompt5, video, unit, style_vector, api_gate)
-        raw_outputs["style_signature"] = style_signature
-        style_signature_parsed = require_parsed("style_signature", style_signature)
 
         task = update_video_tagging_task(
             task_id,
@@ -1848,8 +1786,6 @@ def run_video_tagging_task(task_id):
             error_message=None,
             video_description_unit=unit_parsed,
             personal_tags=personal_tags,
-            style_vector=style_vector_parsed,
-            style_signature=style_signature_parsed,
             raw_outputs=raw_outputs,
         )
     except Exception as exc:
@@ -1998,13 +1934,10 @@ def sample_bloggers(blogger_count=30, videos_per_blogger=15):
         blogger["videos"] = blogger["videos"][:videos_per_blogger]
         blogger["id"] = f"blogger_{idx}"
         blogger["status"] = "pending"
-        blogger["progress"] = {"done": 0, "total": videos_per_blogger * 4 + 1}
+        blogger["progress"] = {"done": 0, "total": videos_per_blogger * 2 + 1}
         blogger["video_units"] = [None] * videos_per_blogger
         blogger["video_classifications"] = [None] * videos_per_blogger
-        blogger["video_style_vectors"] = [None] * videos_per_blogger
-        blogger["video_style_signatures"] = [None] * videos_per_blogger
         blogger["classification_summary"] = None
-        blogger["account_style_summary"] = None
         blogger["account_result"] = None
         blogger["final_account_tags"] = None
         blogger["error"] = ""
@@ -2016,16 +1949,16 @@ def normalize_blogger_results(bloggers):
         video_count = len(blogger.get("videos") or [])
         blogger.setdefault("video_units", [None] * video_count)
         blogger.setdefault("video_classifications", [None] * video_count)
-        blogger.setdefault("video_style_vectors", [None] * video_count)
-        blogger.setdefault("video_style_signatures", [None] * video_count)
         blogger.setdefault("classification_summary", None)
-        blogger.setdefault("account_style_summary", None)
         blogger.setdefault("account_result", None)
         blogger.setdefault("final_account_tags", None)
         blogger.setdefault("error", "")
         blogger.setdefault("status", "pending")
-        blogger["progress"] = blogger.get("progress") or {"done": 0, "total": video_count * 4 + 1}
-        blogger["progress"]["total"] = video_count * 4 + 1
+        blogger.pop("video_style_vectors", None)
+        blogger.pop("video_style_signatures", None)
+        blogger.pop("account_style_summary", None)
+        blogger["progress"] = blogger.get("progress") or {"done": 0, "total": video_count * 2 + 1}
+        blogger["progress"]["total"] = video_count * 2 + 1
     return bloggers
 
 
@@ -2034,16 +1967,16 @@ def reset_blogger_results(bloggers):
     for blogger in reset:
         video_count = len(blogger.get("videos") or [])
         blogger["status"] = "pending"
-        blogger["progress"] = {"done": 0, "total": video_count * 4 + 1}
+        blogger["progress"] = {"done": 0, "total": video_count * 2 + 1}
         blogger["video_units"] = [None] * video_count
         blogger["video_classifications"] = [None] * video_count
-        blogger["video_style_vectors"] = [None] * video_count
-        blogger["video_style_signatures"] = [None] * video_count
         blogger["classification_summary"] = None
-        blogger["account_style_summary"] = None
         blogger["account_result"] = None
         blogger["final_account_tags"] = None
         blogger["error"] = ""
+        blogger.pop("video_style_vectors", None)
+        blogger.pop("video_style_signatures", None)
+        blogger.pop("account_style_summary", None)
     return reset
 
 
@@ -2323,35 +2256,6 @@ def build_classification_prompt(base_prompt, video, unit):
     )
 
 
-def build_style_vector_prompt(base_prompt, video, unit):
-    unit_payload = unit.get("parsed") or unit.get("raw_text") or {}
-    return (
-        f"{base_prompt}\n\n"
-        f"本条视频 metadata：\n"
-        f"- video_url: {video['source_url']}\n"
-        f"- caption: {video['caption'] or '无'}\n"
-        f"- hashtags: {video['hashtag'] or '无'}\n\n"
-        f"第一阶段 video_description_unit：\n"
-        f"{json.dumps(unit_payload, ensure_ascii=False, indent=2)}"
-    )
-
-
-def build_style_signature_prompt(base_prompt, video, unit, style_vector=None):
-    unit_payload = unit.get("parsed") or unit.get("raw_text") or {}
-    vector_payload = style_vector.get("parsed") if isinstance(style_vector, dict) else None
-    return (
-        f"{base_prompt}\n\n"
-        f"本条视频 metadata：\n"
-        f"- video_url: {video['source_url']}\n"
-        f"- caption: {video['caption'] or '无'}\n"
-        f"- hashtags: {video['hashtag'] or '无'}\n\n"
-        f"第一阶段 video_description_unit：\n"
-        f"{json.dumps(unit_payload, ensure_ascii=False, indent=2)}\n\n"
-        f"可选 style_vector：\n"
-        f"{json.dumps(vector_payload or {}, ensure_ascii=False, indent=2)}"
-    )
-
-
 def update_job(job_id, mutator):
     with JOBS_LOCK:
         job = JOBS[job_id]
@@ -2436,49 +2340,6 @@ def analyze_video_classification(prompt3, video, unit, api_gate):
         return {**base, "raw_text": "", "parsed": None, "error": str(exc)}
 
 
-def analyze_video_style_vector(prompt4, video, unit, api_gate):
-    base = {
-        "video_index": unit.get("video_index"),
-        "video_url": video["source_url"],
-        "caption": video["caption"],
-        "hashtag": video["hashtag"],
-    }
-    if unit.get("error"):
-        return {**base, "raw_text": "", "parsed": None, "error": unit["error"]}
-    try:
-        messages = [{"role": "user", "content": build_style_vector_prompt(prompt4, video, unit)}]
-        with api_gate:
-            result = call_evolink_text(messages)
-        text = extract_text(result)
-        return {**base, "raw_text": text, "parsed": parse_json_text(text), "error": ""}
-    except Exception as exc:
-        return {**base, "raw_text": "", "parsed": None, "error": str(exc)}
-
-
-def analyze_video_style_signature(prompt5, video, unit, style_vector, api_gate):
-    base = {
-        "video_index": unit.get("video_index"),
-        "video_url": video["source_url"],
-        "caption": video["caption"],
-        "hashtag": video["hashtag"],
-    }
-    if unit.get("error"):
-        return {**base, "raw_text": "", "parsed": None, "error": unit["error"]}
-    try:
-        messages = [
-            {
-                "role": "user",
-                "content": build_style_signature_prompt(prompt5, video, unit, style_vector),
-            }
-        ]
-        with api_gate:
-            result = call_evolink_text(messages)
-        text = extract_text(result)
-        return {**base, "raw_text": text, "parsed": parse_json_text(text), "error": ""}
-    except Exception as exc:
-        return {**base, "raw_text": "", "parsed": None, "error": str(exc)}
-
-
 def extract_classification_label(classification, key):
     parsed = classification.get("parsed") if classification else None
     if not isinstance(parsed, dict):
@@ -2549,11 +2410,9 @@ def final_account_tags(account_result, classification_summary):
 
 def refresh_derived_fields(job):
     for blogger in job.get("bloggers", []):
-        if blogger.get("video_style_vectors") or blogger.get("video_style_signatures"):
-            blogger["account_style_summary"] = aggregate_style_results(
-                blogger.get("video_style_vectors") or [],
-                blogger.get("video_style_signatures") or [],
-            )
+        blogger.pop("video_style_vectors", None)
+        blogger.pop("video_style_signatures", None)
+        blogger.pop("account_style_summary", None)
         if blogger.get("account_result"):
             blogger["final_account_tags"] = final_account_tags(
                 blogger.get("account_result"),
@@ -2562,345 +2421,7 @@ def refresh_derived_fields(job):
     return job
 
 
-def parsed_payload(result, wrapper_key=None):
-    parsed = result.get("parsed") if isinstance(result, dict) else None
-    if not isinstance(parsed, dict):
-        return {}
-    if wrapper_key and isinstance(parsed.get(wrapper_key), dict):
-        return parsed[wrapper_key]
-    return parsed
-
-
-def top_counts(values, limit=5):
-    counts = {}
-    first_seen = {}
-    for value in values:
-        if value in ("", None, "null"):
-            continue
-        if not isinstance(value, (str, int, float, bool)):
-            value = json.dumps(value, ensure_ascii=False, sort_keys=True)
-        if value not in first_seen:
-            first_seen[value] = len(first_seen)
-        counts[value] = counts.get(value, 0) + 1
-    return [
-        value
-        for value, _ in sorted(counts.items(), key=lambda item: (-item[1], first_seen[item[0]]))[:limit]
-    ]
-
-
-def mode_value(values, default=""):
-    top = top_counts(values, limit=1)
-    return top[0] if top else default
-
-
-def numeric_mean(values, default=0.0):
-    nums = [float(value) for value in values if isinstance(value, (int, float))]
-    if not nums:
-        return default
-    return round(sum(nums) / len(nums), 4)
-
-
-def frequent_values(values, total, limit=5, min_count=2, min_share=0.3):
-    counts = {}
-    first_seen = {}
-    for value in values:
-        if value in ("", None, "null"):
-            continue
-        if not isinstance(value, (str, int, float, bool)):
-            value = json.dumps(value, ensure_ascii=False, sort_keys=True)
-        if value not in first_seen:
-            first_seen[value] = len(first_seen)
-        counts[value] = counts.get(value, 0) + 1
-    threshold = 1 if total < 3 else max(min_count, int(total * min_share + 0.9999))
-    rows = sorted(counts.items(), key=lambda item: (-item[1], first_seen[item[0]]))
-    filtered = [value for value, count in rows if count >= threshold]
-    if not filtered and rows:
-        filtered = [rows[0][0]]
-    return filtered[:limit]
-
-
-def majority_bool(values):
-    bools = [value for value in values if isinstance(value, bool)]
-    if not bools:
-        return False
-    return sum(1 for value in bools if value) / len(bools) >= 0.5
-
-
-def mixed_or_mode(values, default="mixed"):
-    filtered = [value for value in values if value not in ("", None, "null")]
-    if not filtered:
-        return default
-    counts = {}
-    first_seen = {}
-    for value in filtered:
-        if value not in first_seen:
-            first_seen[value] = len(first_seen)
-        counts[value] = counts.get(value, 0) + 1
-    top_value, top_count = sorted(counts.items(), key=lambda item: (-item[1], first_seen[item[0]]))[0]
-    return top_value if top_count / len(filtered) >= 0.5 else "mixed"
-
-
-def aggregate_length_preferences(values):
-    buckets = {}
-    for item in values:
-        if not isinstance(item, dict):
-            continue
-        for key, value in item.items():
-            if value in ("", None, "null"):
-                continue
-            buckets.setdefault(key, []).append(value)
-    return {key: mode_value(items) for key, items in buckets.items()}
-
-
-def collect_style_signatures(style_signatures):
-    signatures = []
-    for item in style_signatures or []:
-        if not item or item.get("error"):
-            continue
-        sig = parsed_payload(item, "style_signature")
-        if sig:
-            signatures.append(sig)
-    return signatures
-
-
-def aggregate_account_style_signature(signatures):
-    total = len(signatures)
-    color = [sig.get("color_palette") or {} for sig in signatures]
-    material = [sig.get("material_profile") or {} for sig in signatures]
-    silhouette = [sig.get("silhouette_profile") or {} for sig in signatures]
-    pattern = [sig.get("pattern_profile") or {} for sig in signatures]
-    mood = [sig.get("aesthetic_mood") or {} for sig in signatures]
-    price = [sig.get("price_positioning") or {} for sig in signatures]
-    era = [sig.get("era_influence") or {} for sig in signatures]
-
-    occasion_totals = {}
-    occasion_count = 0
-    for sig in signatures:
-        occasion = sig.get("occasion_vector") or {}
-        if not isinstance(occasion, dict):
-            continue
-        occasion_count += 1
-        for key, value in occasion.items():
-            if isinstance(value, (int, float)):
-                occasion_totals[key] = occasion_totals.get(key, 0.0) + float(value)
-    occasion_vector = {
-        key: round(value / occasion_count, 4)
-        for key, value in sorted(occasion_totals.items())
-    } if occasion_count else {}
-
-    primary_era = mode_value(
-        [item.get("primary_era") for item in era if item.get("primary_era") is not None],
-        None,
-    )
-    era_authenticity = mode_value(
-        [item.get("era_authenticity") for item in era if item.get("era_authenticity") is not None],
-        None,
-    )
-
-    return {
-        "color_palette": {
-            "dominant_colors": frequent_values(
-                [value for item in color for value in (item.get("dominant_colors") or [])],
-                total,
-            ),
-            "temperature": mode_value([item.get("temperature") for item in color], "neutral"),
-            "saturation": mode_value([item.get("saturation") for item in color], "muted"),
-            "contrast": mode_value([item.get("contrast") for item in color], "medium"),
-            "signature_combos": frequent_values(
-                [value for item in color for value in (item.get("signature_combos") or [])],
-                total,
-                limit=3,
-            ),
-            "monochromatic_tendency": numeric_mean(
-                [item.get("monochromatic_tendency") for item in color]
-            ),
-        },
-        "material_profile": {
-            "primary_materials": frequent_values(
-                [value for item in material for value in (item.get("primary_materials") or [])],
-                total,
-            ),
-            "texture_preference": mode_value(
-                [item.get("texture_preference") for item in material],
-                "mixed",
-            ),
-            "weight_preference": mode_value(
-                [item.get("weight_preference") for item in material],
-                "medium",
-            ),
-            "transparency_level": mode_value(
-                [item.get("transparency_level") for item in material],
-                "opaque",
-            ),
-            "hardware_affinity": numeric_mean(
-                [item.get("hardware_affinity") for item in material]
-            ),
-        },
-        "silhouette_profile": {
-            "fit_preference": mode_value(
-                [item.get("fit_preference") for item in silhouette],
-                "regular",
-            ),
-            "proportion_play": mode_value(
-                [item.get("proportion_play") for item in silhouette],
-                "balanced",
-            ),
-            "structure_level": mode_value(
-                [item.get("structure_level") for item in silhouette],
-                "semi-structured",
-            ),
-            "length_preference": aggregate_length_preferences(
-                [item.get("length_preference") for item in silhouette]
-            ),
-            "layering_complexity": mode_value(
-                [item.get("layering_complexity") for item in silhouette],
-                "minimal",
-            ),
-        },
-        "pattern_profile": {
-            "pattern_types": frequent_values(
-                [value for item in pattern for value in (item.get("pattern_types") or [])],
-                total,
-            ),
-            "pattern_scale": mode_value(
-                [item.get("pattern_scale") for item in pattern],
-                "medium",
-            ),
-            "pattern_frequency": numeric_mean(
-                [item.get("pattern_frequency") for item in pattern]
-            ),
-            "logo_visibility": mode_value(
-                [item.get("logo_visibility") for item in pattern],
-                "none",
-            ),
-            "print_mixing": majority_bool(
-                [item.get("print_mixing") for item in pattern]
-            ),
-        },
-        "aesthetic_mood": {
-            "energy": mode_value([item.get("energy") for item in mood], "balanced"),
-            "formality_range": [
-                mode_value(
-                    [item.get("formality_range", [None, None])[0] for item in mood if isinstance(item.get("formality_range"), list)],
-                    "casual",
-                ),
-                mode_value(
-                    [item.get("formality_range", [None, None])[1] for item in mood if isinstance(item.get("formality_range"), list) and len(item.get("formality_range")) > 1],
-                    "semi-formal",
-                ),
-            ],
-            "gender_expression": mode_value(
-                [item.get("gender_expression") for item in mood],
-                "fluid",
-            ),
-            "cultural_references": frequent_values(
-                [value for item in mood for value in (item.get("cultural_references") or [])],
-                total,
-            ),
-            "mood_keywords": frequent_values(
-                [value for item in mood for value in (item.get("mood_keywords") or [])],
-                total,
-            ),
-        },
-        "occasion_vector": occasion_vector,
-        "price_positioning": {
-            "tier": mixed_or_mode([item.get("tier") for item in price], "mid-range"),
-            "investment_vs_trend": numeric_mean(
-                [item.get("investment_vs_trend") for item in price]
-            ),
-            "brand_consciousness": numeric_mean(
-                [item.get("brand_consciousness") for item in price]
-            ),
-        },
-        "era_influence": {
-            "primary_era": primary_era,
-            "era_authenticity": era_authenticity,
-            "retro_futurism": numeric_mean(
-                [item.get("retro_futurism") for item in era]
-            ),
-        },
-    }
-
-
-def aggregate_style_results(style_vectors, style_signatures):
-    vector_totals = {}
-    vector_count = 0
-    for item in style_vectors or []:
-        if not item or item.get("error"):
-            continue
-        vector = parsed_payload(item, "style_vector")
-        numeric = {
-            key: float(value)
-            for key, value in vector.items()
-            if key in STYLE_NAMES and isinstance(value, (int, float))
-        }
-        if not numeric:
-            continue
-        vector_count += 1
-        for style in STYLE_NAMES:
-            vector_totals[style] = vector_totals.get(style, 0.0) + numeric.get(style, 0.0)
-
-    average_vector = {
-        style: round(vector_totals.get(style, 0.0) / vector_count, 4)
-        for style in STYLE_NAMES
-    } if vector_count else {}
-    top_styles = [
-        {"style": style, "score": score}
-        for style, score in sorted(average_vector.items(), key=lambda item: item[1], reverse=True)[:5]
-        if score > 0
-    ]
-
-    signatures = collect_style_signatures(style_signatures)
-    account_style_signature = aggregate_account_style_signature(signatures)
-    colors = []
-    materials = []
-    moods = []
-    fit_values = []
-    price_tiers = []
-    eras = []
-    temperatures = []
-    occasion_totals = {}
-    occasion_count = 0
-
-    for sig in signatures:
-        colors.extend(sig.get("color_palette", {}).get("dominant_colors") or [])
-        temperatures.append(sig.get("color_palette", {}).get("temperature"))
-        materials.extend(sig.get("material_profile", {}).get("primary_materials") or [])
-        fit_values.append(sig.get("silhouette_profile", {}).get("fit_preference"))
-        moods.extend(sig.get("aesthetic_mood", {}).get("mood_keywords") or [])
-        price_tiers.append(sig.get("price_positioning", {}).get("tier"))
-        eras.append(sig.get("era_influence", {}).get("primary_era"))
-        occasion = sig.get("occasion_vector") or {}
-        if isinstance(occasion, dict):
-            occasion_count += 1
-            for key, value in occasion.items():
-                if isinstance(value, (int, float)):
-                    occasion_totals[key] = occasion_totals.get(key, 0.0) + float(value)
-
-    top_occasions = []
-    if occasion_count:
-        top_occasions = [
-            {"occasion": key, "score": round(value / occasion_count, 4)}
-            for key, value in sorted(occasion_totals.items(), key=lambda item: item[1], reverse=True)[:5]
-        ]
-
-    return {
-        "video_count": max(vector_count, len(signatures)),
-        "average_style_vector": average_vector,
-        "top_styles": top_styles,
-        "account_style_signature": account_style_signature,
-        "dominant_colors": top_counts(colors),
-        "temperature": mode_value(temperatures),
-        "primary_materials": top_counts(materials),
-        "fit_preference": mode_value(fit_values),
-        "mood_keywords": top_counts(moods),
-        "top_occasions": top_occasions,
-        "price_tier": mode_value(price_tiers),
-        "primary_era": mode_value(eras),
-    }
-
-
-def run_job(job_id, prompt1, prompt2, prompt3, prompt4, prompt5, concurrency, api_concurrency):
+def run_job(job_id, prompt1, prompt2, prompt3, concurrency, api_concurrency):
     try:
         update_job(job_id, lambda job: job.update({"status": "running", "started_at": time.time()}))
         with JOBS_LOCK:
@@ -2920,8 +2441,6 @@ def run_job(job_id, prompt1, prompt2, prompt3, prompt4, prompt5, concurrency, ap
         ) as text_executor:
             video_futures = {}
             classification_futures = {}
-            style_vector_futures = {}
-            style_signature_futures = {}
             account_futures = {}
             account_submitted = set()
 
@@ -2929,23 +2448,16 @@ def run_job(job_id, prompt1, prompt2, prompt3, prompt4, prompt5, concurrency, ap
                 b = job["bloggers"][blogger_index]
                 video_done = sum(item is not None for item in b["video_units"])
                 class_done = sum(item is not None for item in b["video_classifications"])
-                vector_done = sum(item is not None for item in b["video_style_vectors"])
-                signature_done = sum(item is not None for item in b["video_style_signatures"])
                 account_done = b.get("account_result") is not None
-                b["progress"]["total"] = len(b.get("videos") or []) * 4 + 1
-                b["progress"]["done"] = video_done + class_done + vector_done + signature_done + (1 if account_done else 0)
+                b["progress"]["total"] = len(b.get("videos") or []) * 2 + 1
+                b["progress"]["done"] = video_done + class_done + (1 if account_done else 0)
                 if account_done:
                     b["final_account_tags"] = final_account_tags(
                         b.get("account_result"),
                         b.get("classification_summary"),
                     )
-                if vector_done or signature_done:
-                    b["account_style_summary"] = aggregate_style_results(
-                        b.get("video_style_vectors") or [],
-                        b.get("video_style_signatures") or [],
-                    )
                 expected = len(b.get("videos") or [])
-                if account_done and class_done == expected and vector_done == expected and signature_done == expected:
+                if account_done and class_done == expected:
                     b["status"] = "done" if not b["account_result"].get("error") else "partial"
                 else:
                     b["status"] = "running"
@@ -2955,12 +2467,10 @@ def run_job(job_id, prompt1, prompt2, prompt3, prompt4, prompt5, concurrency, ap
                     future = video_executor.submit(analyze_video_unit, prompt1, video, video_index, api_gate)
                     video_futures[future] = (blogger_index, video_index)
 
-            while video_futures or classification_futures or style_vector_futures or style_signature_futures or account_futures:
+            while video_futures or classification_futures or account_futures:
                 active_futures = (
                     list(video_futures.keys())
                     + list(classification_futures.keys())
-                    + list(style_vector_futures.keys())
-                    + list(style_signature_futures.keys())
                     + list(account_futures.keys())
                 )
                 done, _ = wait(
@@ -3016,15 +2526,6 @@ def run_job(job_id, prompt1, prompt2, prompt3, prompt4, prompt5, concurrency, ap
                         )
                         classification_futures[class_future] = (blogger_index, video_index)
 
-                        style_future = text_executor.submit(
-                            analyze_video_style_vector,
-                            prompt4,
-                            bloggers[blogger_index]["videos"][video_index - 1],
-                            unit,
-                            api_gate,
-                        )
-                        style_vector_futures[style_future] = (blogger_index, video_index, unit)
-
                     elif future in classification_futures:
                         blogger_index, video_index = classification_futures.pop(future)
                         try:
@@ -3049,68 +2550,6 @@ def run_job(job_id, prompt1, prompt2, prompt3, prompt4, prompt5, concurrency, ap
                             update_blogger_completion(job, blogger_index)
 
                         update_job(job_id, save_classification)
-
-                    elif future in style_vector_futures:
-                        blogger_index, video_index, unit = style_vector_futures.pop(future)
-                        try:
-                            style_vector = future.result()
-                        except Exception as exc:
-                            style_vector = {
-                                "video_index": video_index,
-                                "video_url": bloggers[blogger_index]["videos"][video_index - 1]["source_url"],
-                                "caption": bloggers[blogger_index]["videos"][video_index - 1]["caption"],
-                                "hashtag": bloggers[blogger_index]["videos"][video_index - 1]["hashtag"],
-                                "raw_text": "",
-                                "parsed": None,
-                                "error": str(exc),
-                            }
-
-                        def save_style_vector(job):
-                            b = job["bloggers"][blogger_index]
-                            b["video_style_vectors"][video_index - 1] = style_vector
-                            b["account_style_summary"] = aggregate_style_results(
-                                b["video_style_vectors"],
-                                b["video_style_signatures"],
-                            )
-                            update_blogger_completion(job, blogger_index)
-
-                        update_job(job_id, save_style_vector)
-
-                        signature_future = text_executor.submit(
-                            analyze_video_style_signature,
-                            prompt5,
-                            bloggers[blogger_index]["videos"][video_index - 1],
-                            unit,
-                            style_vector,
-                            api_gate,
-                        )
-                        style_signature_futures[signature_future] = (blogger_index, video_index)
-
-                    elif future in style_signature_futures:
-                        blogger_index, video_index = style_signature_futures.pop(future)
-                        try:
-                            style_signature = future.result()
-                        except Exception as exc:
-                            style_signature = {
-                                "video_index": video_index,
-                                "video_url": bloggers[blogger_index]["videos"][video_index - 1]["source_url"],
-                                "caption": bloggers[blogger_index]["videos"][video_index - 1]["caption"],
-                                "hashtag": bloggers[blogger_index]["videos"][video_index - 1]["hashtag"],
-                                "raw_text": "",
-                                "parsed": None,
-                                "error": str(exc),
-                            }
-
-                        def save_style_signature(job):
-                            b = job["bloggers"][blogger_index]
-                            b["video_style_signatures"][video_index - 1] = style_signature
-                            b["account_style_summary"] = aggregate_style_results(
-                                b["video_style_vectors"],
-                                b["video_style_signatures"],
-                            )
-                            update_blogger_completion(job, blogger_index)
-
-                        update_job(job_id, save_style_signature)
 
                     else:
                         blogger_index = account_futures.pop(future)
@@ -3385,14 +2824,12 @@ class Handler(BaseHTTPRequestHandler):
             prompt1 = body.get("prompt1", "")
             prompt2 = body.get("prompt2", "")
             prompt3 = body.get("prompt3", "")
-            prompt4 = body.get("prompt4", "")
-            prompt5 = body.get("prompt5", "")
             count = int(body.get("count", 30))
             videos = int(body.get("videos", 15))
             concurrency = max(1, min(int(body.get("concurrency", 200)), 500))
             api_concurrency = max(1, min(int(body.get("apiConcurrency", current_api_concurrency())), 500))
-            if not prompt1 or not prompt2 or not prompt3 or not prompt4 or not prompt5:
-                raise ValueError("prompt1, prompt2, prompt3, prompt4 and prompt5 are required")
+            if not prompt1 or not prompt2 or not prompt3:
+                raise ValueError("prompt1, prompt2 and prompt3 are required")
             bloggers = reset_blogger_results(get_or_create_batch(count, videos, force=False))
             job_id = f"job_{int(time.time())}_{random.randint(1000, 9999)}"
             job = {
@@ -3404,8 +2841,6 @@ class Handler(BaseHTTPRequestHandler):
                     "prompt1": prompt1,
                     "prompt2": prompt2,
                     "prompt3": prompt3,
-                    "prompt4": prompt4,
-                    "prompt5": prompt5,
                 },
                 "concurrency": concurrency,
                 "api_concurrency": api_concurrency,
@@ -3415,7 +2850,7 @@ class Handler(BaseHTTPRequestHandler):
                 JOBS[job_id] = job
             threading.Thread(
                 target=run_job,
-                args=(job_id, prompt1, prompt2, prompt3, prompt4, prompt5, concurrency, api_concurrency),
+                args=(job_id, prompt1, prompt2, prompt3, concurrency, api_concurrency),
                 daemon=True,
             ).start()
             json_response(self, job)
